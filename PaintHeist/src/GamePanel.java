@@ -70,11 +70,19 @@ public class GamePanel extends JPanel {
         }
 
         BufferedImage[] getThiefLoadingFrames() {
-            return playerSprites[ACTION_ROW_START[WALK_ACTION] + 3];
+            BufferedImage[] strip = playerSprites[ACTION_ROW_START[WALK_ACTION] + 3];
+            if (strip.length <= 4) return strip;
+            BufferedImage[] four = new BufferedImage[4];
+            System.arraycopy(strip, 0, four, 0, 4);
+            return four;
         }
 
         BufferedImage[] getGuardLoadingFrames() {
-            return guardSprites[1][3];
+            BufferedImage[] strip = guardSprites[1][3];
+            if (strip.length <= 4) return strip;
+            BufferedImage[] four = new BufferedImage[4];
+            System.arraycopy(strip, 0, four, 0, 4);
+            return four;
         }
     }
 

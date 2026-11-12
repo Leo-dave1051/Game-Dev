@@ -130,27 +130,35 @@ public class LoadingPanel extends JPanel {
     }
 
     private void drawRunningPair(Graphics2D g) {
-        int travel = BAR_WIDTH - 28;
-        int thiefCenterX = BAR_X + 14 + travel * progress / 100;
-        int guardCenterX = Math.max(BAR_X + 10, thiefCenterX - 42);
-        if (assets == null) {
-            int step = (int) (animationFrame / 4 % 2);
-            drawRunner(g, guardCenterX, BAR_Y - 9, step, false);
-            drawRunner(g, thiefCenterX, BAR_Y - 9, step, true);
-            return;
-        }
+        if (assets == null) return;
+
+        int travel = BAR_WIDTH - 36;
+        int thiefCenterX = BAR_X + 28 + travel * progress / 100;
+        int guardCenterX = thiefCenterX - 34;
 
         BufferedImage[] thiefFrames = assets.getThiefLoadingFrames();
         BufferedImage[] guardFrames = assets.getGuardLoadingFrames();
+        if (thiefFrames == null || guardFrames == null || thiefFrames.length == 0 || guardFrames.length == 0) return;
+
         int thiefFrame = (int) (animationFrame / 4 % thiefFrames.length);
-        int guardFrame = (int) (animationFrame / 5 % guardFrames.length);
-        drawSpriteRunner(g, guardFrames[guardFrame], guardCenterX, BAR_Y - 2, 24, 48);
-        drawSpriteRunner(g, thiefFrames[thiefFrame], thiefCenterX, BAR_Y - 2, 28, 44);
+        int guardFrame = (int) (animationFrame / 4 % guardFrames.length);
+
+        int groundY = BAR_Y + 5;
+        g.setColor(new Color(0, 0, 0, 85));
+        g.fillOval(guardCenterX - 11, BAR_Y - 2, 22, 4);
+        g.fillOval(thiefCenterX - 10, BAR_Y - 2, 20, 4);
+
+        drawSpriteRunner(g, guardFrames[guardFrame], guardCenterX, groundY, 30, 52);
+        drawSpriteRunner(g, thiefFrames[thiefFrame], thiefCenterX, groundY, 28, 44);
     }
 
     private void drawSpriteRunner(Graphics2D g, BufferedImage sprite, int centerX, int baseline,
                                   int width, int height) {
+        if (sprite == null) return;
+        Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.drawImage(sprite, centerX - width / 2, baseline - height, width, height, null);
+        if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
     }
 
     private void drawRunner(Graphics2D g, int centerX, int groundY, int step, boolean thief) {
