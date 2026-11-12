@@ -650,9 +650,16 @@ public final class MuseumMap {
         private final int x;
         private final int y;
         private final String name;
+        private final BufferedImage originalImage;
+        private final Color[] palette;
+        private BufferedImage fakeImage;
         boolean copied;
         boolean stolen;
         boolean discovered;
+        boolean guardInspected;
+        boolean guardAdmired;
+        boolean guardSuspected;
+        boolean guardAlarmed;
         double copyProgress;
         int quality;
         double discoveryTime;
@@ -663,18 +670,34 @@ public final class MuseumMap {
             this.x = x;
             this.y = y;
             this.name = name;
+            this.originalImage = MasterpieceCatalog.getMasterpiece(name);
+            this.palette = MasterpieceCatalog.getPalette(name);
         }
 
         public int getIndex() { return index; }
         public int getX() { return x; }
         public int getY() { return y; }
         public String getName() { return name; }
+        public BufferedImage getOriginalImage() { return originalImage; }
+        public BufferedImage getFakeImage() { return fakeImage; }
+        public Color[] getPalette() { return palette; }
         public boolean isCopied() { return copied; }
         public boolean isStolen() { return stolen; }
         public boolean isDiscovered() { return discovered; }
+        public boolean isGuardAdmired() { return guardAdmired; }
+        public boolean isGuardSuspected() { return guardSuspected; }
+        public boolean isGuardAlarmed() { return guardAlarmed; }
         public int getCopyProgress() { return (int) Math.round(copyProgress); }
         public int getQuality() { return quality; }
         public Rectangle getBounds() { return new Rectangle(x - 3, y - 3, WIDTH + 6, HEIGHT + 6); }
+
+        public void setFake(BufferedImage fake, int calculatedQuality) {
+            this.fakeImage = fake;
+            this.quality = calculatedQuality;
+            this.copied = true;
+            this.stolen = true;
+            this.copyProgress = 100.0;
+        }
     }
 
     public static final class HideSpot {

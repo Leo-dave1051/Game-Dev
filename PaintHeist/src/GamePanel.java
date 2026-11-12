@@ -3,6 +3,7 @@ import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.imageio.ImageIO;
 import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Composite;
 import java.awt.Cursor;
@@ -36,7 +37,7 @@ import java.util.Set;
 public class GamePanel extends JPanel {
     private static final long serialVersionUID = 1L;
     private enum Screen {
-        MENU, LEVEL_SELECT, SHOP, CUSTOMIZE, SETTINGS, GALLERY, PLAYING, PAUSED, VICTORY, GAME_OVER
+        MENU, LEVEL_SELECT, SHOP, CUSTOMIZE, SETTINGS, GALLERY, PLAYING, FORGERY, PAUSED, VICTORY, GAME_OVER
     }
 
     static final class Assets {
@@ -128,6 +129,16 @@ public class GamePanel extends JPanel {
     private int hoverX = -1;
     private int hoverY = -1;
     private String uiToast = "";
+    private MuseumMap.Painting forgeryPainting;
+    private BufferedImage forgeryCanvas;
+    private final java.util.List<BufferedImage> forgeryUndoList = new java.util.ArrayList<>();
+    private Color forgerySelectedColor = Color.BLACK;
+    private int forgeryBrushSize = 7;
+    private boolean forgeryFillMode;
+    private double forgeryTimeRemaining = 25.0;
+    private Point forgeryLastDrawPoint;
+    private int forgeryAccuracyPreview;
+    private boolean forgeryIsDrawing;
 
     public GamePanel() {
         this(loadAssets());
@@ -151,7 +162,33 @@ public class GamePanel extends JPanel {
             @Override
             public void mousePressed(MouseEvent event) {
                 Point p = toCanvasPoint(event.getX(), event.getY());
-                if (p != null) handleClick(p.x, p.y);
+                if (p != null) {
+                    if (screen == Screen.FORGERY) {
+                        handleForgeryMouseDown(p.x, p.y);
+                    } else {
+                        handleClick(p.x, p.y);
+                    }
+                }
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent event) {
+                Point p = toCanvasPoint(event.getX(), event.getY());
+                if (p != null) {
+                    hoverX = p.x;
+                    hoverY = p.y;
+                    if (screen == Screen.FORGERY) {
+                        handleForgeryMouseDrag(p.x, p.y);
+                    }
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent event) {
+                Point p = toCanvasPoint(event.getX(), event.getY());
+                if (screen == Screen.FORGERY) {
+                    handleForgeryMouseUp(p == null ? -1 : p.x, p == null ? -1 : p.y);
+                }
             }
 
             @Override
@@ -167,6 +204,9 @@ public class GamePanel extends JPanel {
             public void mouseExited(MouseEvent event) {
                 hoverX = -1;
                 hoverY = -1;
+                if (screen == Screen.FORGERY) {
+                    handleForgeryMouseUp(-1, -1);
+                }
                 setCursor(Cursor.getDefaultCursor());
                 if (screen != Screen.PLAYING) repaint();
             }
@@ -188,6 +228,20 @@ public class GamePanel extends JPanel {
     }
 
     private void updateCursor() {
+        if (screen == Screen.FORGERY) {
+            if (hoverX >= 0 && hoverY >= 0) {
+                if (getForgeryCanvasScreenBounds().contains(hoverX, hoverY)) {
+                    setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+                    return;
+                }
+                if (getOriginalScreenBounds().contains(hoverX, hoverY) || isForgeryClickable(hoverX, hoverY)) {
+                    setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                    return;
+                }
+            }
+            setCursor(Cursor.getDefaultCursor());
+            return;
+        }
         boolean clickable = false;
         if (hoverX >= 0 && hoverY >= 0) {
             if (screen == Screen.MENU) {
@@ -305,6 +359,7 @@ public class GamePanel extends JPanel {
                 screen = Screen.LEVEL_SELECT;
                 updateCursor();
             } else if (screen == Screen.LEVEL_SELECT) startSelectedLevel();
+            else if (screen == Screen.FORGERY) finishForgery();
             else if (screen == Screen.PAUSED) resumeGame();
             else if (screen == Screen.VICTORY || screen == Screen.GAME_OVER) startGame(selectedLevel);
             repaint();
@@ -312,8 +367,26 @@ public class GamePanel extends JPanel {
         bindAction("SPACE", "space", () -> {
             if (screen == Screen.MENU) screen = Screen.LEVEL_SELECT;
             else if (screen == Screen.LEVEL_SELECT) startSelectedLevel();
+            else if (screen == Screen.FORGERY) finishForgery();
             else if (screen == Screen.PAUSED) resumeGame();
             repaint();
+        });
+        bindAction("Z", "undo", () -> {
+            if (screen == Screen.FORGERY) undoForgeryStroke();
+        });
+        bindAction("B", "brushTool", () -> {
+            if (screen == Screen.FORGERY) {
+                forgeryFillMode = false;
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+            }
+        });
+        bindAction("K", "fillTool", () -> {
+            if (screen == Screen.FORGERY) {
+                forgeryFillMode = true;
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+            }
         });
         bindAction("R", "restart", () -> {
             if (screen == Screen.PAUSED || screen == Screen.GAME_OVER || screen == Screen.VICTORY) {
@@ -421,6 +494,10 @@ public class GamePanel extends JPanel {
     }
 
     private void handleEscape() {
+        if (screen == Screen.FORGERY) {
+            abortForgery();
+            return;
+        }
         if (screen == Screen.PLAYING) togglePause();
         else if (screen == Screen.LEVEL_SELECT || screen == Screen.SHOP || screen == Screen.CUSTOMIZE
             || screen == Screen.SETTINGS || screen == Screen.GALLERY) {
@@ -576,7 +653,19 @@ public class GamePanel extends JPanel {
     }
 
     private void updateGame(double dt) {
-        if (screen != Screen.PLAYING || world == null) return;
+        if (world == null) return;
+        if (screen == Screen.FORGERY) {
+            updateForgery(dt);
+            repaint();
+            return;
+        }
+        if (screen != Screen.PLAYING) return;
+        MuseumMap.Painting pending = world.pollForgeryRequest();
+        if (pending != null) {
+            startForgery(pending);
+            repaint();
+            return;
+        }
         animationFrame++;
         GameWorld.Input input = new GameWorld.Input(
             pressedKeys.contains("up"),
@@ -631,7 +720,8 @@ public class GamePanel extends JPanel {
         else if (screen == Screen.GALLERY) drawGallery(g);
         else {
             if (world != null) drawGame(g, world);
-            if (screen == Screen.PAUSED) drawOverlay(g, "HEIST PAUSED", "The guards are still on their rounds.", "CONTINUE", "RESTART HEIST", "LEVEL SELECT");
+            if (screen == Screen.FORGERY) drawForgeryStudio(g);
+            else if (screen == Screen.PAUSED) drawOverlay(g, "HEIST PAUSED", "The guards are still on their rounds.", "CONTINUE", "RESTART HEIST", "LEVEL SELECT");
             else if (screen == Screen.VICTORY) drawVictory(g);
             else if (screen == Screen.GAME_OVER) drawOverlay(g, "HEIST BUSTED", world == null ? "" : world.getEndReason(), "TRY AGAIN", "", "LEVEL SELECT");
         }
@@ -759,44 +849,52 @@ public class GamePanel extends JPanel {
             g.setColor(active ? GOLD : new Color(231, 190, 105, pulse));
             g.drawRect(x - 6, y - 6, w + 12, h + 12);
         }
-        Color[] skies = {
-            new Color(45, 93, 124), new Color(60, 106, 86), new Color(91, 67, 117)
-        };
-        Color sky = skies[painting.getIndex() % skies.length];
-        if (painting.isStolen()) sky = sky.brighter();
-        g.setColor(sky);
-        g.fillRect(x, y, w, h);
-        g.setColor(new Color(244, 198, 111));
-        int sunOffset = painting.isStolen() ? 3 : 0;
-        g.fillRect(x + 7 + sunOffset, y + 5, 9, 9);
-        g.setColor(new Color(36, 61, 75));
-        g.fillRect(x + 2, y + 17, 18, 8);
-        g.fillRect(x + 18, y + 12, 16, 13);
-        g.setColor(new Color(53, 89, 64));
-        g.fillRect(x + 30, y + 15, 22, 10);
-        g.setColor(new Color(230, 160, 92));
-        g.fillRect(x + 23, y + 8, 6, 6);
-        g.setColor(new Color(40, 41, 52));
-        g.fillRect(x + 42, y + 5, 8, 6);
-        if (painting.isStolen() && painting.getQuality() < 90) {
-            g.setColor(new Color(244, 205, 157));
-            g.fillRect(x + 47, y + 26, 2, 2);
+
+        // Render artwork canvas: either player's hand-painted fake or original masterpiece
+        if (painting.isStolen() && painting.getFakeImage() != null) {
+            g.drawImage(painting.getFakeImage(), x, y, w, h, null);
+        } else if (painting.getOriginalImage() != null) {
+            g.drawImage(painting.getOriginalImage(), x, y, w, h, null);
+        } else {
+            Color[] skies = {
+                new Color(45, 93, 124), new Color(60, 106, 86), new Color(91, 67, 117)
+            };
+            Color sky = skies[painting.getIndex() % skies.length];
+            g.setColor(sky);
+            g.fillRect(x, y, w, h);
         }
-        if (painting.isStolen() && painting.isDiscovered()) {
-            g.setColor(new Color(183, 63, 54));
-            g.fillRect(x + w - 9, y + 2, 6, 8);
-            g.setColor(Color.WHITE);
-            g.setFont(new Font("Monospaced", Font.BOLD, 7));
-            g.drawString("!", x + w - 8, y + 9);
-        } else if (!painting.isStolen() && painting.isCopied()) {
+
+        // Status badges & Guard inspection indicators
+        if (painting.isStolen()) {
+            if (painting.isGuardAdmired()) {
+                g.setColor(new Color(38, 166, 91));
+                g.fillRoundRect(x + w / 2 - 28, y - 14, 56, 12, 4, 4);
+                g.setColor(Color.WHITE);
+                g.setFont(new Font("Monospaced", Font.BOLD, 8));
+                drawCentered(g, "FOOLED " + painting.getQuality() + "%", x + w / 2, y - 5);
+            } else if (painting.isGuardAlarmed() || painting.isDiscovered()) {
+                g.setColor(new Color(214, 48, 49));
+                g.fillRoundRect(x + w / 2 - 26, y - 14, 52, 12, 4, 4);
+                g.setColor(Color.WHITE);
+                g.setFont(new Font("Monospaced", Font.BOLD, 8));
+                drawCentered(g, "ALARM!", x + w / 2, y - 5);
+            } else if (painting.isGuardSuspected()) {
+                g.setColor(new Color(230, 126, 34));
+                g.fillRoundRect(x + w / 2 - 28, y - 14, 56, 12, 4, 4);
+                g.setColor(Color.WHITE);
+                g.setFont(new Font("Monospaced", Font.BOLD, 8));
+                drawCentered(g, "SUSPECT", x + w / 2, y - 5);
+            } else {
+                g.setColor(new Color(40, 44, 55, 200));
+                g.fillRoundRect(x + w / 2 - 22, y - 12, 44, 10, 4, 4);
+                g.setColor(new Color(230, 230, 230));
+                g.setFont(new Font("Monospaced", Font.BOLD, 7));
+                drawCentered(g, "FAKE " + painting.getQuality() + "%", x + w / 2, y - 4);
+            }
+        } else if (active) {
             g.setFont(new Font("Monospaced", Font.BOLD, 8));
-            g.setColor(new Color(119, 232, 160));
-            drawCentered(g, "SWAP [F]", x + w / 2, y - 9);
-        } else if (!painting.isStolen() && painting.getCopyProgress() > 0) {
-            g.setColor(new Color(32, 34, 42));
-            g.fillRect(x, y - 10, w, 4);
-            g.setColor(new Color(97, 202, 143));
-            g.fillRect(x, y - 10, w * painting.getCopyProgress() / 100, 4);
+            g.setColor(new Color(255, 215, 0));
+            drawCentered(g, "FORGE [E]", x + w / 2, y - 9);
         }
     }
 
@@ -1917,5 +2015,594 @@ public class GamePanel extends JPanel {
     private static void drawCentered(Graphics2D g, String text, int centerX, int baseline) {
         FontMetrics metrics = g.getFontMetrics();
         g.drawString(text, centerX - metrics.stringWidth(text) / 2, baseline);
+    }
+
+    private static final int FORGERY_CANVAS_W = 336;
+    private static final int FORGERY_CANVAS_H = 204;
+    private static final int ORIGINAL_W = 336;
+    private static final int ORIGINAL_H = 204;
+    private static final int ORIGINAL_X = 90;
+    private static final int ORIGINAL_Y = 85;
+    private static final int FORGERY_CANVAS_X = 510;
+    private static final int FORGERY_CANVAS_Y = 85;
+
+    private Rectangle getForgeryCanvasScreenBounds() {
+        return new Rectangle(FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_W, FORGERY_CANVAS_H);
+    }
+
+    private Rectangle getOriginalScreenBounds() {
+        return new Rectangle(ORIGINAL_X, ORIGINAL_Y, ORIGINAL_W, ORIGINAL_H);
+    }
+
+    private Rectangle getForgeryUndoButtonBounds() {
+        return new Rectangle(510, 302, 75, 30);
+    }
+
+    private Rectangle getForgeryClearButtonBounds() {
+        return new Rectangle(595, 302, 75, 30);
+    }
+
+    private Rectangle getForgeryBrushButtonBounds() {
+        return new Rectangle(680, 302, 78, 30);
+    }
+
+    private Rectangle getForgeryFillButtonBounds() {
+        return new Rectangle(768, 302, 78, 30);
+    }
+
+    private Rectangle getBrushSizeBounds(int sizeIndex) {
+        int[] widths = {48, 48, 48, 58};
+        int[] xs = {600, 656, 712, 768};
+        return new Rectangle(xs[sizeIndex], 340, widths[sizeIndex], 26);
+    }
+
+    private Rectangle getPaletteSwatchBounds(int index) {
+        int col = index % 6;
+        int row = index / 6;
+        return new Rectangle(90 + col * 56, 302 + row * 34, 48, 28);
+    }
+
+    private Rectangle getForgeryCancelButtonBounds() {
+        return new Rectangle(480, 446, 150, 46);
+    }
+
+    private Rectangle getForgeryReplaceButtonBounds() {
+        return new Rectangle(650, 446, 210, 46);
+    }
+
+    private boolean isForgeryClickable(int x, int y) {
+        if (getForgeryReplaceButtonBounds().contains(x, y)) return true;
+        if (getForgeryCancelButtonBounds().contains(x, y)) return true;
+        if (getForgeryUndoButtonBounds().contains(x, y)) return true;
+        if (getForgeryClearButtonBounds().contains(x, y)) return true;
+        if (getForgeryBrushButtonBounds().contains(x, y)) return true;
+        if (getForgeryFillButtonBounds().contains(x, y)) return true;
+        for (int i = 0; i < 4; i++) {
+            if (getBrushSizeBounds(i).contains(x, y)) return true;
+        }
+        Color[] availableColors = getForgeryPaletteList();
+        for (int i = 0; i < availableColors.length; i++) {
+            if (getPaletteSwatchBounds(i).contains(x, y)) return true;
+        }
+        return false;
+    }
+
+    private Color[] getForgeryPaletteList() {
+        Color[] p = (forgeryPainting != null) ? forgeryPainting.getPalette() : null;
+        Color[] standards = {
+            Color.BLACK, Color.WHITE, ForgeryEvaluator.BLANK_CANVAS_COLOR,
+            new Color(192, 57, 43), new Color(41, 128, 185), new Color(39, 174, 96),
+            new Color(243, 156, 18), new Color(142, 68, 173), new Color(100, 70, 50),
+            new Color(52, 73, 94), new Color(244, 208, 111), new Color(26, 188, 156)
+        };
+        Color[] result = new Color[12];
+        int idx = 0;
+        if (p != null) {
+            for (Color c : p) {
+                if (idx < 12 && c != null) result[idx++] = c;
+            }
+        }
+        for (Color s : standards) {
+            if (idx >= 12) break;
+            boolean exists = false;
+            for (int j = 0; j < idx; j++) {
+                if (result[j] != null && result[j].equals(s)) { exists = true; break; }
+            }
+            if (!exists) result[idx++] = s;
+        }
+        return result;
+    }
+
+    private void startForgery(MuseumMap.Painting painting) {
+        if (painting == null) return;
+        this.forgeryPainting = painting;
+        this.forgeryCanvas = new BufferedImage(
+            MasterpieceCatalog.CANVAS_WIDTH, MasterpieceCatalog.CANVAS_HEIGHT, BufferedImage.TYPE_INT_ARGB
+        );
+        Graphics2D cg = forgeryCanvas.createGraphics();
+        cg.setColor(ForgeryEvaluator.BLANK_CANVAS_COLOR);
+        cg.fillRect(0, 0, MasterpieceCatalog.CANVAS_WIDTH, MasterpieceCatalog.CANVAS_HEIGHT);
+        cg.dispose();
+
+        forgeryUndoList.clear();
+        forgeryUndoList.add(cloneCanvas(forgeryCanvas));
+
+        Color[] pal = painting.getPalette();
+        this.forgerySelectedColor = (pal != null && pal.length > 0) ? pal[0] : Color.BLACK;
+        this.forgeryBrushSize = 7;
+        this.forgeryFillMode = false;
+        this.forgeryIsDrawing = false;
+        this.forgeryLastDrawPoint = null;
+
+        double baseTime = 25.0;
+        if (levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY)) {
+            baseTime += 10.0;
+        }
+        this.forgeryTimeRemaining = baseTime;
+        this.forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
+            painting.getOriginalImage(), forgeryCanvas, painting.getPalette()
+        );
+
+        this.screen = Screen.FORGERY;
+        pressedKeys.clear();
+        updateCursor();
+        SoundEffects.play(SoundEffects.Cue.CLICK);
+    }
+
+    private void updateForgery(double dt) {
+        if (screen != Screen.FORGERY || forgeryPainting == null) return;
+        forgeryTimeRemaining -= dt;
+        if (forgeryTimeRemaining <= 0) {
+            forgeryTimeRemaining = 0;
+            finishForgery();
+        }
+    }
+
+    private void finishForgery() {
+        if (forgeryPainting == null || forgeryCanvas == null) {
+            screen = Screen.PLAYING;
+            return;
+        }
+        int accuracy = ForgeryEvaluator.evaluateAccuracy(
+            forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
+        );
+        world.applyCompletedForgery(forgeryPainting, forgeryCanvas, accuracy);
+        screen = Screen.PLAYING;
+        forgeryPainting = null;
+        forgeryCanvas = null;
+        forgeryUndoList.clear();
+        updateCursor();
+        repaint();
+    }
+
+    private void abortForgery() {
+        screen = Screen.PLAYING;
+        forgeryPainting = null;
+        forgeryCanvas = null;
+        forgeryUndoList.clear();
+        updateCursor();
+        SoundEffects.play(SoundEffects.Cue.CLICK);
+        repaint();
+    }
+
+    private void undoForgeryStroke() {
+        if (forgeryUndoList.size() > 1) {
+            forgeryUndoList.remove(forgeryUndoList.size() - 1);
+            BufferedImage prev = forgeryUndoList.get(forgeryUndoList.size() - 1);
+            forgeryCanvas = cloneCanvas(prev);
+            if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
+                forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
+                    forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
+                );
+            }
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+        }
+    }
+
+    private void clearForgeryCanvas() {
+        if (forgeryCanvas == null) return;
+        forgeryUndoList.add(cloneCanvas(forgeryCanvas));
+        if (forgeryUndoList.size() > 15) forgeryUndoList.remove(0);
+        Graphics2D cg = forgeryCanvas.createGraphics();
+        cg.setColor(ForgeryEvaluator.BLANK_CANVAS_COLOR);
+        cg.fillRect(0, 0, MasterpieceCatalog.CANVAS_WIDTH, MasterpieceCatalog.CANVAS_HEIGHT);
+        cg.dispose();
+        if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
+            forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
+                forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
+            );
+        }
+        SoundEffects.play(SoundEffects.Cue.CLICK);
+        repaint();
+    }
+
+    private static BufferedImage cloneCanvas(BufferedImage src) {
+        BufferedImage copy = new BufferedImage(src.getWidth(), src.getHeight(), src.getType());
+        Graphics2D g = copy.createGraphics();
+        g.drawImage(src, 0, 0, null);
+        g.dispose();
+        return copy;
+    }
+
+    private void floodFill(BufferedImage img, int startX, int startY, Color targetColor) {
+        int targetRgb = targetColor.getRGB();
+        int srcRgb = img.getRGB(startX, startY);
+        if (srcRgb == targetRgb) return;
+        int w = img.getWidth();
+        int h = img.getHeight();
+        boolean[] visited = new boolean[w * h];
+        int[] queue = new int[w * h];
+        int head = 0, tail = 0;
+        queue[tail++] = startY * w + startX;
+        visited[startY * w + startX] = true;
+        while (head < tail) {
+            int idx = queue[head++];
+            int x = idx % w;
+            int y = idx / w;
+            img.setRGB(x, y, targetRgb);
+            if (x > 0 && !visited[idx - 1] && img.getRGB(x - 1, y) == srcRgb) {
+                visited[idx - 1] = true;
+                queue[tail++] = idx - 1;
+            }
+            if (x < w - 1 && !visited[idx + 1] && img.getRGB(x + 1, y) == srcRgb) {
+                visited[idx + 1] = true;
+                queue[tail++] = idx + 1;
+            }
+            if (y > 0 && !visited[idx - w] && img.getRGB(x, y - 1) == srcRgb) {
+                visited[idx - w] = true;
+                queue[tail++] = idx - w;
+            }
+            if (y < h - 1 && !visited[idx + w] && img.getRGB(x, y + 1) == srcRgb) {
+                visited[idx + w] = true;
+                queue[tail++] = idx + w;
+            }
+        }
+    }
+
+    private void handleForgeryMouseDown(int x, int y) {
+        if (getForgeryReplaceButtonBounds().contains(x, y)) {
+            finishForgery();
+            return;
+        }
+        if (getForgeryCancelButtonBounds().contains(x, y)) {
+            abortForgery();
+            return;
+        }
+        if (getForgeryUndoButtonBounds().contains(x, y)) {
+            undoForgeryStroke();
+            return;
+        }
+        if (getForgeryClearButtonBounds().contains(x, y)) {
+            clearForgeryCanvas();
+            return;
+        }
+        if (getForgeryBrushButtonBounds().contains(x, y)) {
+            forgeryFillMode = false;
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+            return;
+        }
+        if (getForgeryFillButtonBounds().contains(x, y)) {
+            forgeryFillMode = true;
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+            return;
+        }
+        int[] sizes = {3, 7, 14, 24};
+        for (int i = 0; i < sizes.length; i++) {
+            if (getBrushSizeBounds(i).contains(x, y)) {
+                forgeryBrushSize = sizes[i];
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+                return;
+            }
+        }
+        Color[] availableColors = getForgeryPaletteList();
+        for (int i = 0; i < availableColors.length; i++) {
+            if (getPaletteSwatchBounds(i).contains(x, y)) {
+                forgerySelectedColor = availableColors[i];
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+                return;
+            }
+        }
+        // Eyedropper: Click on original masterpiece to sample its color
+        if (getOriginalScreenBounds().contains(x, y) && forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
+            int ox = (x - ORIGINAL_X) * MasterpieceCatalog.CANVAS_WIDTH / ORIGINAL_W;
+            int oy = (y - ORIGINAL_Y) * MasterpieceCatalog.CANVAS_HEIGHT / ORIGINAL_H;
+            ox = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_WIDTH - 1, ox));
+            oy = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_HEIGHT - 1, oy));
+            int rgb = forgeryPainting.getOriginalImage().getRGB(ox, oy);
+            forgerySelectedColor = new Color(rgb, false);
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+            return;
+        }
+        // Draw or fill on forgery canvas
+        if (getForgeryCanvasScreenBounds().contains(x, y) && forgeryCanvas != null) {
+            int cx = (x - FORGERY_CANVAS_X) * MasterpieceCatalog.CANVAS_WIDTH / FORGERY_CANVAS_W;
+            int cy = (y - FORGERY_CANVAS_Y) * MasterpieceCatalog.CANVAS_HEIGHT / FORGERY_CANVAS_H;
+            cx = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_WIDTH - 1, cx));
+            cy = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_HEIGHT - 1, cy));
+
+            forgeryUndoList.add(cloneCanvas(forgeryCanvas));
+            if (forgeryUndoList.size() > 15) forgeryUndoList.remove(0);
+
+            if (forgeryFillMode) {
+                floodFill(forgeryCanvas, cx, cy, forgerySelectedColor);
+                if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
+                    forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
+                        forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
+                    );
+                }
+                repaint();
+            } else {
+                forgeryIsDrawing = true;
+                forgeryLastDrawPoint = new Point(cx, cy);
+                Graphics2D cg = forgeryCanvas.createGraphics();
+                cg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+                cg.setColor(forgerySelectedColor);
+                cg.fillOval(cx - forgeryBrushSize / 2, cy - forgeryBrushSize / 2, forgeryBrushSize, forgeryBrushSize);
+                cg.dispose();
+                repaint();
+            }
+        }
+    }
+
+    private void handleForgeryMouseDrag(int x, int y) {
+        if (!forgeryIsDrawing || forgeryCanvas == null || forgeryLastDrawPoint == null) return;
+        int cx = (x - FORGERY_CANVAS_X) * MasterpieceCatalog.CANVAS_WIDTH / FORGERY_CANVAS_W;
+        int cy = (y - FORGERY_CANVAS_Y) * MasterpieceCatalog.CANVAS_HEIGHT / FORGERY_CANVAS_H;
+        cx = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_WIDTH - 1, cx));
+        cy = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_HEIGHT - 1, cy));
+
+        Graphics2D cg = forgeryCanvas.createGraphics();
+        cg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+        cg.setColor(forgerySelectedColor);
+        cg.setStroke(new BasicStroke(forgeryBrushSize, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        cg.drawLine(forgeryLastDrawPoint.x, forgeryLastDrawPoint.y, cx, cy);
+        cg.fillOval(cx - forgeryBrushSize / 2, cy - forgeryBrushSize / 2, forgeryBrushSize, forgeryBrushSize);
+        cg.dispose();
+
+        forgeryLastDrawPoint = new Point(cx, cy);
+        repaint();
+    }
+
+    private void handleForgeryMouseUp(int x, int y) {
+        if (forgeryIsDrawing) {
+            forgeryIsDrawing = false;
+            forgeryLastDrawPoint = null;
+            if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null && forgeryCanvas != null) {
+                forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
+                    forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
+                );
+            }
+            repaint();
+        }
+    }
+
+    private void drawForgeryStudio(Graphics2D g) {
+        if (forgeryPainting == null || forgeryCanvas == null) return;
+
+        // Dark dim backdrop over the live museum heist
+        g.setColor(new Color(8, 10, 16, 235));
+        g.fillRect(0, 0, WIDTH, HEIGHT);
+
+        int wx = 60, wy = 20, ww = 840, wh = 500;
+
+        // Modal Studio Window
+        g.setColor(new Color(24, 27, 36));
+        g.fillRoundRect(wx, wy, ww, wh, 12, 12);
+        g.setColor(new Color(195, 155, 85));
+        g.setStroke(new BasicStroke(2.0f));
+        g.drawRoundRect(wx, wy, ww, wh, 12, 12);
+        g.setStroke(new BasicStroke(1.0f));
+
+        // Header
+        g.setColor(new Color(36, 42, 54));
+        g.fillRoundRect(wx + 2, wy + 2, ww - 4, 52, 10, 10);
+        g.fillRect(wx + 2, wy + 40, ww - 4, 14);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 17));
+        g.setColor(new Color(255, 218, 120));
+        g.drawString("FORGERY STUDIO: " + forgeryPainting.getName().toUpperCase(), wx + 24, wy + 28);
+
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setColor(new Color(180, 190, 205));
+        g.drawString("Replicate the masterpiece to deceive museum guards. Guards will inspect the fake!", wx + 24, wy + 45);
+
+        // Timer bar & countdown
+        double maxTime = levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY) ? 35.0 : 25.0;
+        double ratio = Math.max(0.0, Math.min(1.0, forgeryTimeRemaining / maxTime));
+        int timerBarW = 200;
+        int timerBarX = wx + ww - 240;
+        int timerBarY = wy + 18;
+
+        g.setColor(new Color(15, 18, 25));
+        g.fillRoundRect(timerBarX - 4, timerBarY - 4, timerBarW + 8, 24, 6, 6);
+        g.setColor(new Color(60, 68, 85));
+        g.drawRoundRect(timerBarX - 4, timerBarY - 4, timerBarW + 8, 24, 6, 6);
+
+        Color timerColor = forgeryTimeRemaining > 10.0 ? new Color(46, 204, 113)
+            : forgeryTimeRemaining > 5.0 ? new Color(241, 196, 15) : new Color(231, 76, 60);
+        g.setColor(timerColor);
+        g.fillRoundRect(timerBarX, timerBarY, (int) (timerBarW * ratio), 16, 4, 4);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setColor(Color.WHITE);
+        String timerStr = String.format("TIMER: %.1fs", forgeryTimeRemaining);
+        drawCentered(g, timerStr, timerBarX + timerBarW / 2, timerBarY + 12);
+
+        // --- LEFT: ORIGINAL MASTERPIECE ---
+        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setColor(new Color(245, 220, 160));
+        g.drawString("ORIGINAL MASTERPIECE", ORIGINAL_X, ORIGINAL_Y - 10);
+
+        String artist = MasterpieceCatalog.getArtist(forgeryPainting.getName());
+        g.setFont(new Font("Monospaced", Font.ITALIC, 10));
+        g.setColor(new Color(170, 180, 195));
+        g.drawString(artist, ORIGINAL_X + 170, ORIGINAL_Y - 10);
+
+        // Frame around original
+        g.setColor(new Color(15, 18, 24));
+        g.fillRect(ORIGINAL_X - 6, ORIGINAL_Y - 6, ORIGINAL_W + 12, ORIGINAL_H + 12);
+        g.setColor(new Color(165, 125, 65));
+        g.drawRect(ORIGINAL_X - 4, ORIGINAL_Y - 4, ORIGINAL_W + 8, ORIGINAL_H + 8);
+        g.setColor(new Color(235, 195, 115));
+        g.drawRect(ORIGINAL_X - 2, ORIGINAL_Y - 2, ORIGINAL_W + 4, ORIGINAL_H + 4);
+
+        if (forgeryPainting.getOriginalImage() != null) {
+            g.drawImage(forgeryPainting.getOriginalImage(), ORIGINAL_X, ORIGINAL_Y, ORIGINAL_W, ORIGINAL_H, null);
+        }
+
+        // Eyedropper hint under original
+        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setColor(new Color(160, 175, 195));
+        g.drawString("Tip: Click any color on the original to sample with eyedropper", ORIGINAL_X, ORIGINAL_Y + ORIGINAL_H + 14);
+
+        // --- RIGHT: FORGERY CANVAS ---
+        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setColor(new Color(245, 220, 160));
+        g.drawString("YOUR REPLICA CANVAS", FORGERY_CANVAS_X, FORGERY_CANVAS_Y - 10);
+
+        // Frame around fake canvas
+        g.setColor(new Color(15, 18, 24));
+        g.fillRect(FORGERY_CANVAS_X - 6, FORGERY_CANVAS_Y - 6, FORGERY_CANVAS_W + 12, FORGERY_CANVAS_H + 12);
+        g.setColor(new Color(120, 95, 60));
+        g.drawRect(FORGERY_CANVAS_X - 4, FORGERY_CANVAS_Y - 4, FORGERY_CANVAS_W + 8, FORGERY_CANVAS_H + 8);
+        g.setColor(new Color(205, 165, 95));
+        g.drawRect(FORGERY_CANVAS_X - 2, FORGERY_CANVAS_Y - 2, FORGERY_CANVAS_W + 4, FORGERY_CANVAS_H + 4);
+
+        g.drawImage(forgeryCanvas, FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_W, FORGERY_CANVAS_H, null);
+
+        // Hover cursor circle on canvas
+        if (hoverX >= FORGERY_CANVAS_X && hoverX < FORGERY_CANVAS_X + FORGERY_CANVAS_W
+            && hoverY >= FORGERY_CANVAS_Y && hoverY < FORGERY_CANVAS_Y + FORGERY_CANVAS_H) {
+            int r = Math.max(3, (int) Math.round(forgeryBrushSize * (double) FORGERY_CANVAS_W / MasterpieceCatalog.CANVAS_WIDTH));
+            g.setColor(new Color(forgerySelectedColor.getRed(), forgerySelectedColor.getGreen(), forgerySelectedColor.getBlue(), 160));
+            g.fillOval(hoverX - r / 2, hoverY - r / 2, r, r);
+            g.setColor(Color.WHITE);
+            g.drawOval(hoverX - r / 2, hoverY - r / 2, r, r);
+        }
+
+        // --- PALETTE SWATCHES (Bottom Left) ---
+        Color[] availableColors = getForgeryPaletteList();
+        for (int i = 0; i < availableColors.length; i++) {
+            Rectangle sb = getPaletteSwatchBounds(i);
+            Color c = availableColors[i];
+            boolean selected = c != null && c.equals(forgerySelectedColor);
+            boolean hovered = hoverX >= 0 && hoverY >= 0 && sb.contains(hoverX, hoverY);
+
+            if (c != null) {
+                g.setColor(c);
+                g.fillRect(sb.x, sb.y, sb.width, sb.height);
+
+                if (selected) {
+                    g.setColor(new Color(255, 230, 110));
+                    g.setStroke(new BasicStroke(3.0f));
+                    g.drawRect(sb.x - 2, sb.y - 2, sb.width + 4, sb.height + 4);
+                    g.setStroke(new BasicStroke(1.0f));
+                    g.setColor((c.getRed() + c.getGreen() + c.getBlue()) > 380 ? Color.BLACK : Color.WHITE);
+                    g.fillRect(sb.x + sb.width / 2 - 2, sb.y + sb.height / 2 - 2, 4, 4);
+                } else if (hovered) {
+                    g.setColor(Color.WHITE);
+                    g.drawRect(sb.x - 1, sb.y - 1, sb.width + 2, sb.height + 2);
+                } else {
+                    g.setColor(new Color(60, 68, 80));
+                    g.drawRect(sb.x, sb.y, sb.width, sb.height);
+                }
+            }
+        }
+
+        // --- TOOLS (Bottom Right) ---
+        drawStudioToolButton(g, getForgeryUndoButtonBounds(), "UNDO", false);
+        drawStudioToolButton(g, getForgeryClearButtonBounds(), "CLEAR", false);
+        drawStudioToolButton(g, getForgeryBrushButtonBounds(), "BRUSH", !forgeryFillMode);
+        drawStudioToolButton(g, getForgeryFillButtonBounds(), "FILL", forgeryFillMode);
+
+        // Brush Sizes
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(new Color(200, 210, 225));
+        g.drawString("BRUSH SIZE:", 510, 357);
+
+        int[] sizes = {3, 7, 14, 24};
+        String[] sizeLabels = {"3px", "7px", "14px", "24px"};
+        for (int i = 0; i < sizes.length; i++) {
+            Rectangle bsb = getBrushSizeBounds(i);
+            boolean activeSize = (forgeryBrushSize == sizes[i]);
+            drawStudioToolButton(g, bsb, sizeLabels[i], activeSize);
+        }
+
+        // --- ACCURACY PREVIEW & GUARD METER (Middle Left) ---
+        int meterX = 90;
+        int meterY = 385;
+        int meterW = 340;
+        int meterH = 34;
+
+        g.setColor(new Color(16, 20, 28));
+        g.fillRoundRect(meterX, meterY, meterW, meterH, 6, 6);
+        g.setColor(new Color(55, 65, 80));
+        g.drawRoundRect(meterX, meterY, meterW, meterH, 6, 6);
+
+        int fillW = (int) (meterW * Math.min(100, forgeryAccuracyPreview) / 100.0);
+        Color statusColor = (forgeryAccuracyPreview >= 80) ? new Color(46, 204, 113)
+            : (forgeryAccuracyPreview >= 60) ? new Color(243, 156, 18) : new Color(231, 76, 60);
+
+        g.setColor(new Color(statusColor.getRed(), statusColor.getGreen(), statusColor.getBlue(), 60));
+        g.fillRoundRect(meterX + 2, meterY + 2, Math.max(0, fillW - 4), meterH - 4, 4, 4);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setColor(statusColor);
+        String statusText;
+        if (forgeryAccuracyPreview >= 80) {
+            statusText = "MATCH: " + forgeryAccuracyPreview + "%  [MASTERPIECE - GUARDS FOOLED]";
+        } else if (forgeryAccuracyPreview >= 60) {
+            statusText = "MATCH: " + forgeryAccuracyPreview + "%  [PASSABLE - SLIGHT SUSPICION]";
+        } else {
+            statusText = "MATCH: " + forgeryAccuracyPreview + "%  [CRUDE FAKE - ALARM ON SIGHT!]";
+        }
+        drawCentered(g, statusText, meterX + meterW / 2, meterY + 22);
+
+        // --- ACTION BUTTONS (Bottom Center/Right) ---
+        drawCustomActionButton(g, getForgeryCancelButtonBounds(), "CANCEL [ESC]", false, new Color(75, 45, 45));
+        drawCustomActionButton(g, getForgeryReplaceButtonBounds(), "REPLACE & SWAP [ENTER]", true, new Color(38, 115, 65));
+    }
+
+    private void drawStudioToolButton(Graphics2D g, Rectangle bounds, String text, boolean highlighted) {
+        boolean hovered = hoverX >= 0 && hoverY >= 0 && bounds.contains(hoverX, hoverY);
+        Color bg = highlighted ? new Color(180, 135, 65)
+            : (hovered ? new Color(55, 64, 82) : new Color(36, 42, 55));
+        g.setColor(bg);
+        g.fillRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 6, 6);
+        g.setColor(highlighted || hovered ? new Color(255, 220, 130) : new Color(75, 85, 105));
+        g.drawRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 6, 6);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(highlighted ? Color.WHITE : (hovered ? new Color(255, 240, 200) : new Color(200, 210, 225)));
+        drawCentered(g, text, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 + 4);
+    }
+
+    private void drawCustomActionButton(Graphics2D g, Rectangle bounds, String text, boolean primary, Color baseColor) {
+        boolean hovered = hoverX >= 0 && hoverY >= 0 && bounds.contains(hoverX, hoverY);
+        int dx = hovered ? bounds.x - 1 : bounds.x;
+        int dy = hovered ? bounds.y - 1 : bounds.y;
+        int dw = hovered ? bounds.width + 2 : bounds.width;
+        int dh = hovered ? bounds.height + 2 : bounds.height;
+
+        Color bg = hovered ? baseColor.brighter() : baseColor;
+        g.setColor(bg);
+        g.fillRoundRect(dx, dy, dw, dh, 8, 8);
+
+        Color border = primary ? (hovered ? new Color(255, 240, 160) : new Color(235, 195, 110))
+            : (hovered ? new Color(200, 160, 160) : new Color(130, 95, 95));
+        g.setColor(border);
+        g.setStroke(new BasicStroke(primary ? 2.0f : 1.5f));
+        g.drawRoundRect(dx, dy, dw, dh, 8, 8);
+        g.setStroke(new BasicStroke(1.0f));
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setColor(hovered ? Color.WHITE : new Color(245, 240, 230));
+        drawCentered(g, text, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 + 5);
     }
 }

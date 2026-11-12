@@ -106,7 +106,7 @@ public final class GameWorld {
             SoundEffects.play(SoundEffects.Cue.PASSAGE);
             showMessage("Hidden passage discovered: " + approachedPassage.getName() + ".", 2.8);
         }
-        interactPressed = interactPressed || input.interactPressed;
+        interactPressed = interactPressed || input.interactPressed || input.interact;
         stealPressed = stealPressed || input.stealPressed;
         distractPressed = distractPressed || input.distractPressed;
 
@@ -189,41 +189,18 @@ public final class GameWorld {
         }
 
         activePainting = findNearbyPainting();
-        MuseumMap.Painting copyingNow = null;
         if (activePainting != null && !activePainting.isStolen() && hidingIn == null) {
-            if (input.interact && !activePainting.isCopied()) {
-                copyingNow = activePainting;
-                activePainting.copyProgress = Math.min(100,
-                    activePainting.copyProgress + dt * copySpeedMultiplier * 100.0 / 3.2);
-                if (noiseCooldown <= 0) {
-                    makeNoise(150, 0.65);
-                    noiseCooldown = 1.1;
-                }
-                if (activePainting.copyProgress >= 100) {
-                    activePainting.copied = true;
-                    activePainting.quality = Math.max(65, Math.min(99, 86 + (int) (12 - suspicion / 9)));
-                    SoundEffects.play(SoundEffects.Cue.COPY_COMPLETE);
-                    showMessage("Copy complete (" + activePainting.quality + "%). Press F to swap.", 2.5);
-                }
-            }
-            if (stealPressed && activePainting.isCopied()) {
-                activePainting.stolen = true;
-                activePainting.discoveryTime = Math.max(14, 31 - activePainting.quality * 0.12);
-                makeNoise(225, 0.9);
-                SoundEffects.play(SoundEffects.Cue.SWAP);
-                showMessage("Original secured. The fake is in place.", 2.8);
-                activePainting = null;
-            } else if (stealPressed && !activePainting.isCopied()) {
-                showMessage("Copy this artwork first (hold E).", 1.8);
+            if (interactPressed) {
+                pendingForgeryPainting = activePainting;
+                forgeryRequested = true;
+                interactPressed = false;
             }
         } else if (activePainting != null && activePainting.isStolen() && hidingIn == null && interactPressed) {
+            String verdict = activePainting.isGuardAdmired() ? "Guards were completely fooled!"
+                : activePainting.isGuardAlarmed() ? "Guards sounded the alarm on this fake!"
+                : "Guards have not closely inspected this yet.";
             showMessage("Replica inspection: " + activePainting.getQuality()
-                + "% match. The original is safely in your bag.", 2.8);
-        }
-        for (MuseumMap.Painting painting : map.getPaintings()) {
-            if (!painting.isCopied() && painting != copyingNow && painting.copyProgress > 0) {
-                painting.copyProgress = Math.max(0, painting.copyProgress - dt * 12.0);
-            }
+                + "% match. " + verdict, 3.0);
         }
 
         updateFakeDiscoveries(dt);
@@ -380,6 +357,33 @@ public final class GameWorld {
         return null;
     }
 
+    private boolean forgeryRequested;
+    private MuseumMap.Painting pendingForgeryPainting;
+
+    public MuseumMap.Painting pollForgeryRequest() {
+        if (!forgeryRequested) return null;
+        forgeryRequested = false;
+        MuseumMap.Painting target = pendingForgeryPainting;
+        pendingForgeryPainting = null;
+        return target;
+    }
+
+    public void applyCompletedForgery(MuseumMap.Painting painting, java.awt.image.BufferedImage fake, int quality) {
+        if (painting == null) return;
+        painting.setFake(fake, quality);
+        painting.discoveryTime = Math.max(16.0, 36.0 - quality * 0.16);
+        makeNoise(180, 0.75);
+        SoundEffects.play(SoundEffects.Cue.SWAP);
+        if (quality >= 80) {
+            showMessage("Masterpiece replica placed (" + quality + "% match)! Guards will be fooled.", 3.2);
+        } else if (quality >= 60) {
+            showMessage("Passable fake placed (" + quality + "% match). Watch out for alert guards.", 3.2);
+        } else {
+            showMessage("Crude fake placed (" + quality + "% match)! If a guard inspects this, you will be caught!", 3.5);
+        }
+        activePainting = null;
+    }
+
     private void updateFakeDiscoveries(double dt) {
         for (MuseumMap.Painting painting : map.getPaintings()) {
             if (!painting.isStolen() || painting.isDiscovered()) continue;
@@ -387,27 +391,45 @@ public final class GameWorld {
                 double distance = Point.distance(guard.centerX(), guard.centerY(),
                     painting.getX() + MuseumMap.Painting.WIDTH / 2.0,
                     painting.getY() + MuseumMap.Painting.HEIGHT / 2.0);
-                if (distance < 68 && map.hasLineOfSight(guard.centerX(), guard.centerY(),
+                if (distance < 78 && map.hasLineOfSight(guard.centerX(), guard.centerY(),
                     painting.getX() + MuseumMap.Painting.WIDTH / 2.0,
                     painting.getY() + MuseumMap.Painting.HEIGHT / 2.0)) {
+
                     painting.nearbyGuardTime += dt;
-                    if (painting.nearbyGuardTime >= 2.5) {
-                        painting.discovered = true;
-                        suspicion = Math.min(100, suspicion + 28);
-                        alertNearestGuardToFake(painting);
-                        SoundEffects.play(SoundEffects.Cue.ALERT);
-                        showMessage("A guard spotted a fake: " + painting.getName() + ".", 3.2);
+                    if (painting.nearbyGuardTime >= 1.5 && !painting.guardInspected) {
+                        painting.guardInspected = true;
+                        if (painting.getQuality() >= 80) {
+                            painting.guardAdmired = true;
+                            suspicion = Math.max(0, suspicion - 6);
+                            showMessage("Guard inspected '" + painting.getName() + "': 'A magnificent work!' (FOOLED!)", 3.2);
+                        } else if (painting.getQuality() >= 60) {
+                            painting.guardSuspected = true;
+                            suspicion = Math.min(100, suspicion + 14);
+                            showMessage("Guard inspected '" + painting.getName() + "': 'Wait... something looks odd here...'", 3.0);
+                        } else {
+                            painting.guardAlarmed = true;
+                            painting.discovered = true;
+                            suspicion = Math.min(100, suspicion + 40);
+                            alertNearestGuardToFake(painting);
+                            guard.setSearchTarget(playerX, playerY);
+                            makeNoiseAt(painting.getX(), painting.getY(), 420, 1.0, "fake alarm");
+                            SoundEffects.play(SoundEffects.Cue.ALERT);
+                            showMessage("ALARM! A guard detected the fake '" + painting.getName() + "' (" + painting.getQuality() + "%)! RUN!", 3.8);
+                        }
                     }
                     break;
                 }
             }
-            painting.discoveryTime -= dt;
-            if (painting.discoveryTime <= 0 && !painting.isDiscovered()) {
-                painting.discovered = true;
-                suspicion = Math.min(100, suspicion + 18);
-                alertNearestGuardToFake(painting);
-                SoundEffects.play(SoundEffects.Cue.ALERT);
-                showMessage("Museum staff identified a weak copy.", 3.0);
+            if (painting.getQuality() < 60 && !painting.isDiscovered()) {
+                painting.discoveryTime -= dt;
+                if (painting.discoveryTime <= 0) {
+                    painting.discovered = true;
+                    painting.guardAlarmed = true;
+                    suspicion = Math.min(100, suspicion + 25);
+                    alertNearestGuardToFake(painting);
+                    SoundEffects.play(SoundEffects.Cue.ALERT);
+                    showMessage("Museum staff identified the poor fake '" + painting.getName() + "'!", 3.2);
+                }
             }
         }
     }
@@ -523,12 +545,12 @@ public final class GameWorld {
         }
         if (activePainting != null) {
             if (activePainting.isStolen()) {
-                return "E  INSPECT REPLICA  -  QUALITY " + activePainting.getQuality() + "%";
+                String repTag = activePainting.isGuardAdmired() ? "FLAWLESS"
+                    : activePainting.isGuardAlarmed() ? "COMPROMISED"
+                    : (activePainting.getQuality() >= 80 ? "MASTERPIECE" : activePainting.getQuality() >= 60 ? "PASSABLE" : "POOR");
+                return "E  INSPECT REPLICA  -  " + activePainting.getQuality() + "% (" + repTag + ")";
             }
-            if (activePainting.isCopied()) return "F  STEAL " + activePainting.getName().toUpperCase() + "  /  PLACE THE FAKE";
-            int paintingCopy = activePainting.getCopyProgress();
-            return "HOLD E  COPY " + activePainting.getName().toUpperCase()
-                + (paintingCopy > 0 ? "  -  " + paintingCopy + "%" : "");
+            return "E  FORGE & SWAP " + activePainting.getName().toUpperCase();
         }
         if (isAtAnyExit() && getStolenCount() < map.getPaintingCount()) {
             return "EXIT LOCKED  -  SWAP ALL " + map.getPaintingCount() + " PAINTINGS FIRST";
