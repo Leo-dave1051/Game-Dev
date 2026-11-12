@@ -135,7 +135,8 @@ public class GamePanel extends JPanel {
     private Color forgerySelectedColor = Color.BLACK;
     private int forgeryBrushSize = 7;
     private boolean forgeryFillMode;
-    private double forgeryTimeRemaining = 25.0;
+    private double forgeryTimeRemaining = 120.0;
+    private double forgeryMaxTime = 120.0;
     private Point forgeryLastDrawPoint;
     private int forgeryAccuracyPreview;
     private boolean forgeryIsDrawing;
@@ -1439,7 +1440,7 @@ public class GamePanel extends JPanel {
             if (levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY)) {
                 uiToast = "QUICK FORGER IS ALREADY OWNED.";
             } else if (levelManager.buyUpgrade(LevelManager.UPGRADE_FAST_COPY, 20)) {
-                uiToast = "UNLOCKED QUICK FORGER (+30% COPY SPEED)!";
+                uiToast = "UNLOCKED QUICK FORGER (+30S FORGERY TIME)!";
             } else {
                 uiToast = "NEED 20 CREDITS FOR QUICK FORGER.";
             }
@@ -1495,7 +1496,7 @@ public class GamePanel extends JPanel {
             LevelManager.OUTFIT_NAMES[3].toUpperCase()
         };
         String[] descs = {
-            "Copy paintings 30% faster during swaps",
+            "Adds +30s bonus replication time in Forgery Studio",
             "Throw coin distractions 35% farther",
             "Laser switches stay offline 5s longer",
             "Ruby coat tint for bold midnight heists",
@@ -2134,10 +2135,13 @@ public class GamePanel extends JPanel {
         this.forgeryIsDrawing = false;
         this.forgeryLastDrawPoint = null;
 
-        double baseTime = 25.0;
+        String levelDiff = (world != null && world.getMap() != null && world.getMap().getLevel() != null)
+            ? world.getMap().getLevel().getDifficulty() : "EASY";
+        double baseTime = MasterpieceCatalog.getReplicationTimeSeconds(painting.getName(), levelDiff);
         if (levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY)) {
-            baseTime += 10.0;
+            baseTime += 30.0; // +30s bonus with Quick Forger upgrade
         }
+        this.forgeryMaxTime = baseTime;
         this.forgeryTimeRemaining = baseTime;
         this.forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
             painting.getOriginalImage(), forgeryCanvas, painting.getPalette()
@@ -2408,13 +2412,19 @@ public class GamePanel extends JPanel {
         g.setColor(new Color(255, 218, 120));
         g.drawString("FORGERY STUDIO: " + forgeryPainting.getName().toUpperCase(), wx + 24, wy + 28);
 
+        String levelDiff = (world != null && world.getMap() != null && world.getMap().getLevel() != null)
+            ? world.getMap().getLevel().getDifficulty() : "EASY";
+        String diffLabel = MasterpieceCatalog.getDifficultyLabel(forgeryPainting.getName(), levelDiff);
+        int totalSecs = (int) Math.round(forgeryMaxTime);
+        String headerSub = String.format("DIFFICULTY: %s (%d:%02d) - Replicate accurately to deceive museum guards!",
+            diffLabel, totalSecs / 60, totalSecs % 60);
+
         g.setFont(new Font("Monospaced", Font.PLAIN, 11));
         g.setColor(new Color(180, 190, 205));
-        g.drawString("Replicate the masterpiece to deceive museum guards. Guards will inspect the fake!", wx + 24, wy + 45);
+        g.drawString(headerSub, wx + 24, wy + 45);
 
         // Timer bar & countdown
-        double maxTime = levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY) ? 35.0 : 25.0;
-        double ratio = Math.max(0.0, Math.min(1.0, forgeryTimeRemaining / maxTime));
+        double ratio = Math.max(0.0, Math.min(1.0, forgeryTimeRemaining / Math.max(1.0, forgeryMaxTime)));
         int timerBarW = 200;
         int timerBarX = wx + ww - 240;
         int timerBarY = wy + 18;
@@ -2424,14 +2434,21 @@ public class GamePanel extends JPanel {
         g.setColor(new Color(60, 68, 85));
         g.drawRoundRect(timerBarX - 4, timerBarY - 4, timerBarW + 8, 24, 6, 6);
 
-        Color timerColor = forgeryTimeRemaining > 10.0 ? new Color(46, 204, 113)
-            : forgeryTimeRemaining > 5.0 ? new Color(241, 196, 15) : new Color(231, 76, 60);
+        Color timerColor = forgeryTimeRemaining > 30.0 ? new Color(46, 204, 113)
+            : forgeryTimeRemaining > 15.0 ? new Color(241, 196, 15) : new Color(231, 76, 60);
         g.setColor(timerColor);
         g.fillRoundRect(timerBarX, timerBarY, (int) (timerBarW * ratio), 16, 4, 4);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 12));
         g.setColor(Color.WHITE);
-        String timerStr = String.format("TIMER: %.1fs", forgeryTimeRemaining);
+        String timerStr;
+        if (forgeryTimeRemaining >= 60.0) {
+            int mins = (int) forgeryTimeRemaining / 60;
+            int secs = (int) forgeryTimeRemaining % 60;
+            timerStr = String.format("TIMER: %d:%02d", mins, secs);
+        } else {
+            timerStr = String.format("TIMER: %.1fs", forgeryTimeRemaining);
+        }
         drawCentered(g, timerStr, timerBarX + timerBarW / 2, timerBarY + 12);
 
         // --- LEFT: ORIGINAL MASTERPIECE ---

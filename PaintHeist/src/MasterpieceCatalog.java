@@ -34,6 +34,29 @@ public final class MasterpieceCatalog {
         return ARTISTS.getOrDefault(name, "Unknown Master");
     }
 
+    public static int getReplicationTimeSeconds(String name, String levelDifficulty) {
+        int base = 120; // At least 2 minutes (120s) for Easy paintings
+        String diff = levelDifficulty != null ? levelDifficulty.toUpperCase() : "";
+        if (diff.contains("VERY HARD") || diff.contains("EXPERT")) {
+            base = 210; // 3.5 minutes for Very Hard
+        } else if (diff.contains("HARD")) {
+            base = 180; // 3.0 minutes for Hard
+        } else if (diff.contains("MEDIUM")) {
+            base = 150; // 2.5 minutes for Medium
+        } else {
+            base = 120; // 2.0 minutes for Easy
+        }
+        return base;
+    }
+
+    public static String getDifficultyLabel(String name, String levelDifficulty) {
+        String diff = levelDifficulty != null ? levelDifficulty.toUpperCase() : "EASY";
+        if (diff.contains("VERY HARD")) return "VERY HARD";
+        if (diff.contains("HARD")) return "HARD";
+        if (diff.contains("MEDIUM")) return "MEDIUM";
+        return "EASY";
+    }
+
     private static BufferedImage renderMasterpiece(String name) {
         BufferedImage img = new BufferedImage(CANVAS_WIDTH, CANVAS_HEIGHT, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
