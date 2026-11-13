@@ -106,6 +106,11 @@ public class GamePanel extends JPanel {
     private static final int VICTORY_NEXT_Y = 335;
     private static final int VICTORY_REPLAY_Y = 395;
     private static final int VICTORY_SELECT_Y = 455;
+    private static final int PAUSE_BTN_CONTINUE_Y = 236;
+    private static final int PAUSE_BTN_RESTART_Y = 296;
+    private static final int PAUSE_BTN_SELECT_Y = 356;
+    private static final int GAMEOVER_BTN_RETRY_Y = 370;
+    private static final int GAMEOVER_BTN_SELECT_Y = 430;
     private static final Rectangle MENU_PLAY_BOUNDS = new Rectangle(397, 238, 166, 91);
     private static final Rectangle MENU_CUSTOMIZE_BOUNDS = new Rectangle(401, 340, 158, 57);
     private static final Rectangle MENU_SETTINGS_BOUNDS = new Rectangle(401, 403, 158, 57);
@@ -265,16 +270,16 @@ public class GamePanel extends JPanel {
             } else if (screen == Screen.GALLERY) {
                 clickable = buttonBounds(390, 505).contains(hoverX, hoverY);
             } else if (screen == Screen.PAUSED) {
-                clickable = buttonBounds(390, 330).contains(hoverX, hoverY)
-                    || buttonBounds(390, 390).contains(hoverX, hoverY)
-                    || buttonBounds(390, 450).contains(hoverX, hoverY);
+                clickable = buttonBounds(390, PAUSE_BTN_CONTINUE_Y).contains(hoverX, hoverY)
+                    || buttonBounds(390, PAUSE_BTN_RESTART_Y).contains(hoverX, hoverY)
+                    || buttonBounds(390, PAUSE_BTN_SELECT_Y).contains(hoverX, hoverY);
             } else if (screen == Screen.VICTORY) {
                 clickable = buttonBounds(390, VICTORY_NEXT_Y).contains(hoverX, hoverY)
                     || buttonBounds(390, VICTORY_REPLAY_Y).contains(hoverX, hoverY)
                     || buttonBounds(390, VICTORY_SELECT_Y).contains(hoverX, hoverY);
             } else if (screen == Screen.GAME_OVER) {
-                clickable = buttonBounds(390, 390).contains(hoverX, hoverY)
-                    || buttonBounds(390, 450).contains(hoverX, hoverY);
+                clickable = buttonBounds(390, GAMEOVER_BTN_RETRY_Y).contains(hoverX, hoverY)
+                    || buttonBounds(390, GAMEOVER_BTN_SELECT_Y).contains(hoverX, hoverY);
             }
         }
         setCursor(Cursor.getPredefinedCursor(clickable ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
@@ -596,9 +601,9 @@ public class GamePanel extends JPanel {
                 repaint();
             }
         } else if (screen == Screen.PAUSED) {
-            if (buttonBounds(390, 330).contains(x, y)) resumeGame();
-            else if (buttonBounds(390, 390).contains(x, y)) startGame();
-            else if (buttonBounds(390, 450).contains(x, y)) handleEscape();
+            if (buttonBounds(390, PAUSE_BTN_CONTINUE_Y).contains(x, y)) resumeGame();
+            else if (buttonBounds(390, PAUSE_BTN_RESTART_Y).contains(x, y)) startGame();
+            else if (buttonBounds(390, PAUSE_BTN_SELECT_Y).contains(x, y)) handleEscape();
         } else if (screen == Screen.VICTORY) {
             if (buttonBounds(390, VICTORY_NEXT_Y).contains(x, y)) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
@@ -614,10 +619,10 @@ public class GamePanel extends JPanel {
                 repaint();
             }
         } else if (screen == Screen.GAME_OVER) {
-            if (buttonBounds(390, 390).contains(x, y)) {
+            if (buttonBounds(390, GAMEOVER_BTN_RETRY_Y).contains(x, y)) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
                 startGame(selectedLevel);
-            } else if (buttonBounds(390, 450).contains(x, y)) {
+            } else if (buttonBounds(390, GAMEOVER_BTN_SELECT_Y).contains(x, y)) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
                 handleEscape();
             }
@@ -747,9 +752,11 @@ public class GamePanel extends JPanel {
         if (levelManager.isLightingEnabled()) {
             drawLighting(g, game.getPlayerCenterX(), game.getPlayerCenterY());
         }
-        drawHud(g, game);
-        drawMinimap(g, game);
-        drawPrompt(g, game);
+        if (screen == Screen.PLAYING) {
+            drawHud(g, game);
+            drawMinimap(g, game);
+            drawPrompt(g, game);
+        }
     }
 
     private void drawGuardVision(Graphics2D g, java.util.List<Guard> guards) {
@@ -2268,10 +2275,10 @@ public class GamePanel extends JPanel {
             g.setColor(new Color((int) (25 + 40 * strobe), 10, (int) (20 + 35 * (1.0 - strobe)), 240));
             g.fillRect(0, 0, WIDTH, HEIGHT);
 
-            int dx = 225;
-            int dy = 55;
-            int dw = 510;
-            int dh = 430;
+            int dw = 520;
+            int dh = 440;
+            int dx = (WIDTH - dw) / 2;
+            int dy = (HEIGHT - dh) / 2;
 
             // Police Dossier Manila Card
             g.setColor(new Color(28, 30, 38));
@@ -2284,16 +2291,16 @@ public class GamePanel extends JPanel {
             // Distressed "APPREHENDED" Stamp
             g.setFont(new Font("Monospaced", Font.BOLD, 28));
             g.setColor(new Color(225, 45, 40));
-            drawCentered(g, "★ BUSTED BY SECURITY ★", WIDTH / 2, dy + 42);
+            drawCentered(g, "★ BUSTED BY SECURITY ★", WIDTH / 2, dy + 44);
 
             g.setFont(new Font("Monospaced", Font.BOLD, 12));
             g.setColor(new Color(255, 180, 175));
-            drawCentered(g, "POLICE INCIDENT REPORT // ARREST DOSSIER", WIDTH / 2, dy + 64);
+            drawCentered(g, "POLICE INCIDENT REPORT // ARREST DOSSIER", WIDTH / 2, dy + 68);
 
             // Mugshot Box on left
-            int mx = dx + 28;
-            int my = dy + 85;
-            int mw = 120;
+            int mx = dx + 30;
+            int my = dy + 90;
+            int mw = 124;
             int mh = 145;
             g.setColor(new Color(15, 17, 24));
             g.fillRect(mx, my, mw, mh);
@@ -2318,8 +2325,8 @@ public class GamePanel extends JPanel {
             drawCentered(g, "CASE #0942", mx + mw / 2, my + mh - 18);
 
             // Incident Details on right
-            int rx = dx + 165;
-            int ry = dy + 92;
+            int rx = dx + 175;
+            int ry = dy + 98;
             g.setFont(new Font("Monospaced", Font.BOLD, 11));
             g.setColor(new Color(245, 215, 140));
             g.drawString("FAILURE LOG:", rx, ry);
@@ -2337,17 +2344,17 @@ public class GamePanel extends JPanel {
             g.drawString("STATUS: SUSPECT TAKEN INTO CUSTODY", rx, ry);
 
             // Action Buttons
-            drawButton(g, first.isEmpty() ? "TRY AGAIN" : first, 390, 390, true);
-            drawButton(g, third.isEmpty() ? "LEVEL SELECT" : third, 390, 450, false);
+            drawButton(g, first.isEmpty() ? "TRY AGAIN" : first, 390, GAMEOVER_BTN_RETRY_Y, true);
+            drawButton(g, third.isEmpty() ? "LEVEL SELECT" : third, 390, GAMEOVER_BTN_SELECT_Y, false);
         } else {
             // Tactical Blueprint Pause Menu
             g.setColor(new Color(8, 14, 25, 225));
             g.fillRect(0, 0, WIDTH, HEIGHT);
 
-            int px = 245;
-            int py = 75;
-            int pw = 470;
-            int ph = 415;
+            int pw = 500;
+            int ph = 410;
+            int px = (WIDTH - pw) / 2;
+            int py = (HEIGHT - ph) / 2;
 
             // Blueprint card
             g.setColor(new Color(16, 28, 48));
@@ -2363,19 +2370,19 @@ public class GamePanel extends JPanel {
             g.drawRoundRect(px, py, pw, ph, 10, 10);
             g.setStroke(new BasicStroke(1.0f));
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 22));
+            g.setFont(new Font("Monospaced", Font.BOLD, 20));
             g.setColor(new Color(110, 215, 255));
-            drawCentered(g, "// HEIST OPERATION PAUSED", WIDTH / 2, py + 42);
+            drawCentered(g, "// HEIST OPERATION PAUSED", WIDTH / 2, py + 36);
 
             g.setFont(new Font("Monospaced", Font.PLAIN, 11));
             g.setColor(new Color(190, 220, 245));
-            drawCentered(g, "Museum guards and cameras frozen in position.", WIDTH / 2, py + 68);
+            drawCentered(g, "Museum guards and cameras frozen in position.", WIDTH / 2, py + 58);
 
             // Mission briefing stats box
-            int bx = px + 25;
-            int by = py + 88;
-            int bw = pw - 50;
-            int bh = 60;
+            int bx = px + 28;
+            int by = py + 72;
+            int bw = pw - 56;
+            int bh = 54;
             g.setColor(new Color(10, 18, 32, 220));
             g.fillRoundRect(bx, by, bw, bh, 6, 6);
             g.setColor(new Color(45, 95, 155));
@@ -2387,14 +2394,26 @@ public class GamePanel extends JPanel {
             int total = world != null ? world.getTargetCount() : 0;
             int timeL = world != null ? world.getTimeLeft() : 0;
             int susp = world != null ? world.getSuspicion() : 0;
-            drawCentered(g, "ARTWORKS FORGED: " + stolen + "/" + total + "   |   TIME LEFT: " + timeL + "s   |   SUSPICION: " + susp + "%", bx + bw / 2, by + 24);
+            drawCentered(g, "ARTWORKS FORGED: " + stolen + "/" + total + "   |   TIME LEFT: " + timeL + "s   |   SUSPICION: " + susp + "%", bx + bw / 2, by + 21);
             g.setColor(new Color(170, 205, 235));
-            drawCentered(g, "KEYBINDINGS: P RESUME  •  R RESTART  •  ESC MENU", bx + bw / 2, by + 44);
+            drawCentered(g, "HEIST OBJECTIVE: FORGE TARGETS & EVADE GUARDS", bx + bw / 2, by + 40);
 
-            int firstY = 330;
-            if (!first.isEmpty()) drawButton(g, first, 390, firstY, true);
-            if (!second.isEmpty()) drawButton(g, second, 390, 390, false);
-            drawButton(g, third, 390, 450, false);
+            if (!first.isEmpty()) drawButton(g, first, 390, PAUSE_BTN_CONTINUE_Y, true);
+            if (!second.isEmpty()) drawButton(g, second, 390, PAUSE_BTN_RESTART_Y, false);
+            drawButton(g, third, 390, PAUSE_BTN_SELECT_Y, false);
+
+            // Hotkey quick-reference bar
+            int kx = bx;
+            int ky = py + 332;
+            int kw = bw;
+            int kh = 34;
+            g.setColor(new Color(10, 20, 36, 180));
+            g.fillRoundRect(kx, ky, kw, kh, 6, 6);
+            g.setColor(new Color(45, 95, 155));
+            g.drawRoundRect(kx, ky, kw, kh, 6, 6);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(200, 230, 255));
+            drawCentered(g, "HOTKEYS: [P] RESUME  •  [R] RESTART  •  [ESC] MENU", bx + bw / 2, ky + 21);
         }
     }
 
@@ -2531,14 +2550,14 @@ public class GamePanel extends JPanel {
         g.drawString(text, centerX - metrics.stringWidth(text) / 2, baseline);
     }
 
-    private static final int FORGERY_CANVAS_W = 336;
-    private static final int FORGERY_CANVAS_H = 204;
-    private static final int ORIGINAL_W = 336;
-    private static final int ORIGINAL_H = 204;
-    private static final int ORIGINAL_X = 90;
-    private static final int ORIGINAL_Y = 85;
-    private static final int FORGERY_CANVAS_X = 510;
-    private static final int FORGERY_CANVAS_Y = 85;
+    private static final int FORGERY_CANVAS_W = 340;
+    private static final int FORGERY_CANVAS_H = 208;
+    private static final int ORIGINAL_W = 340;
+    private static final int ORIGINAL_H = 208;
+    private static final int ORIGINAL_X = 86;
+    private static final int ORIGINAL_Y = 114;
+    private static final int FORGERY_CANVAS_X = 534;
+    private static final int FORGERY_CANVAS_Y = 114;
 
     private Rectangle getForgeryCanvasScreenBounds() {
         return new Rectangle(FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_W, FORGERY_CANVAS_H);
@@ -2549,39 +2568,39 @@ public class GamePanel extends JPanel {
     }
 
     private Rectangle getForgeryUndoButtonBounds() {
-        return new Rectangle(510, 302, 75, 30);
+        return new Rectangle(532, 346, 78, 30);
     }
 
     private Rectangle getForgeryClearButtonBounds() {
-        return new Rectangle(595, 302, 75, 30);
+        return new Rectangle(618, 346, 78, 30);
     }
 
     private Rectangle getForgeryBrushButtonBounds() {
-        return new Rectangle(680, 302, 78, 30);
+        return new Rectangle(704, 346, 84, 30);
     }
 
     private Rectangle getForgeryFillButtonBounds() {
-        return new Rectangle(768, 302, 78, 30);
+        return new Rectangle(796, 346, 82, 30);
     }
 
     private Rectangle getBrushSizeBounds(int sizeIndex) {
-        int[] widths = {48, 48, 48, 58};
-        int[] xs = {600, 656, 712, 768};
-        return new Rectangle(xs[sizeIndex], 340, widths[sizeIndex], 26);
+        int[] widths = {54, 54, 54, 68};
+        int[] xs = {628, 688, 748, 808};
+        return new Rectangle(xs[sizeIndex], 380, widths[sizeIndex], 30);
     }
 
     private Rectangle getPaletteSwatchBounds(int index) {
         int col = index % 6;
         int row = index / 6;
-        return new Rectangle(90 + col * 56, 302 + row * 34, 48, 28);
+        return new Rectangle(82 + col * 58, 346 + row * 34, 52, 30);
     }
 
     private Rectangle getForgeryCancelButtonBounds() {
-        return new Rectangle(480, 446, 150, 46);
+        return new Rectangle(524, 498, 144, 56);
     }
 
     private Rectangle getForgeryReplaceButtonBounds() {
-        return new Rectangle(650, 446, 210, 46);
+        return new Rectangle(678, 498, 206, 56);
     }
 
     private boolean isForgeryClickable(int x, int y) {
@@ -2906,7 +2925,10 @@ public class GamePanel extends JPanel {
         g.setColor(new Color(6, 8, 14, 238));
         g.fillRect(0, 0, WIDTH, HEIGHT);
 
-        int wx = 55, wy = 16, ww = 850, wh = 508;
+        int ww = 880;
+        int wh = 560;
+        int wx = (WIDTH - ww) / 2;
+        int wy = (HEIGHT - wh) / 2;
 
         // Mahogany wood drafting table base
         g.setPaint(new GradientPaint(wx, wy, new Color(44, 28, 20), wx, wy + wh, new Color(26, 16, 12)));
@@ -2933,33 +2955,35 @@ public class GamePanel extends JPanel {
         drawBrassBracket(g, wx + ww - 26, wy + wh - 26, false, false);
 
         // --- HEADER BAR ---
-        int hx = wx + 12, hy = wy + 10, hw = ww - 24, hh = 50;
+        int hx = wx + 14, hy = wy + 10, hw = ww - 28, hh = 50;
         g.setPaint(new GradientPaint(hx, hy, new Color(34, 24, 18), hx, hy + hh, new Color(18, 12, 10)));
         g.fillRoundRect(hx, hy, hw, hh, 8, 8);
         g.setColor(new Color(165, 125, 60));
         g.drawRoundRect(hx, hy, hw, hh, 8, 8);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 16));
+        String pName = forgeryPainting.getName().toUpperCase();
+        String pArtist = MasterpieceCatalog.getArtist(forgeryPainting.getName());
+        g.setFont(new Font("Monospaced", Font.BOLD, 15));
         g.setColor(new Color(255, 225, 140));
-        g.drawString("ATELIER FORGERY STUDIO: " + forgeryPainting.getName().toUpperCase(), hx + 18, hy + 23);
+        g.drawString("ATELIER FORGERY STUDIO: \"" + pName + "\" (" + pArtist + ")", hx + 16, hy + 22);
 
         String levelDiff = (world != null && world.getMap() != null && world.getMap().getLevel() != null)
             ? world.getMap().getLevel().getDifficulty() : "EASY";
         String diffLabel = MasterpieceCatalog.getDifficultyLabel(forgeryPainting.getName(), levelDiff);
         int totalSecs = (int) Math.round(forgeryMaxTime);
-        String headerSub = String.format("DIFFICULTY: %s (%d:%02d)  •  REPLICATE ACCURATELY TO DECEIVE GUARDS",
+        String headerSub = String.format("DIFFICULTY: %s (%d:%02d)  •  CLICK ORIGINAL TO SAMPLE COLOR  •  MATCH ARTWORK TO DECEIVE GUARDS",
             diffLabel, totalSecs / 60, totalSecs % 60);
 
         g.setFont(new Font("Monospaced", Font.PLAIN, 10));
         g.setColor(new Color(205, 195, 185));
-        g.drawString(headerSub, hx + 18, hy + 40);
+        g.drawString(headerSub, hx + 16, hy + 40);
 
         // Timer bar & digital readout
         double ratio = Math.max(0.0, Math.min(1.0, forgeryTimeRemaining / Math.max(1.0, forgeryMaxTime)));
-        int timerBarW = 190;
-        int timerBarX = hx + hw - 204;
-        int timerBarY = hy + 13;
-        int timerBarH = 24;
+        int timerBarW = 180;
+        int timerBarX = hx + hw - 192;
+        int timerBarY = hy + 11;
+        int timerBarH = 28;
 
         g.setColor(new Color(12, 10, 8));
         g.fillRoundRect(timerBarX - 3, timerBarY - 3, timerBarW + 6, timerBarH + 6, 6, 6);
@@ -2981,75 +3005,53 @@ public class GamePanel extends JPanel {
         } else {
             timerStr = String.format("TIMER %.1fs", forgeryTimeRemaining);
         }
-        drawCentered(g, timerStr, timerBarX + timerBarW / 2, timerBarY + 16);
+        drawCentered(g, timerStr, timerBarX + timerBarW / 2, timerBarY + 18);
+
+        // --- SECTION TITLES ABOVE FRAMES ---
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(new Color(255, 225, 140));
+        drawCentered(g, "✦ ORIGINAL MASTERPIECE ✦", ORIGINAL_X + ORIGINAL_W / 2, 101);
+        drawCentered(g, "✎ REPLICA CANVAS", FORGERY_CANVAS_X + FORGERY_CANVAS_W / 2, 101);
 
         // --- LEFT: ORIGINAL MASTERPIECE ---
-        // Brass museum title placard above original
-        g.setColor(new Color(36, 26, 18));
-        g.fillRoundRect(ORIGINAL_X, ORIGINAL_Y - 18, ORIGINAL_W, 16, 4, 4);
-        g.setColor(new Color(195, 155, 75));
-        g.drawRoundRect(ORIGINAL_X, ORIGINAL_Y - 18, ORIGINAL_W, 16, 4, 4);
-
-        String artist = MasterpieceCatalog.getArtist(forgeryPainting.getName());
-        g.setFont(new Font("Monospaced", Font.BOLD, 9));
-        g.setColor(new Color(255, 230, 140));
-        drawCentered(g, "✦ ORIGINAL EXHIBIT: " + forgeryPainting.getName().toUpperCase() + " (" + artist + ") ✦",
-            ORIGINAL_X + ORIGINAL_W / 2, ORIGINAL_Y - 6);
-
         // Drop shadow behind museum frame
         g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(ORIGINAL_X - 6 + 4, ORIGINAL_Y - 6 + 4, ORIGINAL_W + 12, ORIGINAL_H + 12);
+        g.fillRect(ORIGINAL_X - 6 + 4, ORIGINAL_Y - 5 + 4, ORIGINAL_W + 12, ORIGINAL_H + 10);
 
         // Gilded ornate museum frame
         g.setColor(new Color(26, 18, 12));
-        g.fillRect(ORIGINAL_X - 8, ORIGINAL_Y - 8, ORIGINAL_W + 16, ORIGINAL_H + 16);
+        g.fillRect(ORIGINAL_X - 6, ORIGINAL_Y - 5, ORIGINAL_W + 12, ORIGINAL_H + 10);
         g.setColor(new Color(212, 175, 75));
-        g.drawRect(ORIGINAL_X - 6, ORIGINAL_Y - 6, ORIGINAL_W + 11, ORIGINAL_H + 11);
+        g.drawRect(ORIGINAL_X - 5, ORIGINAL_Y - 4, ORIGINAL_W + 9, ORIGINAL_H + 7);
         g.setColor(new Color(145, 105, 38));
-        g.drawRect(ORIGINAL_X - 4, ORIGINAL_Y - 4, ORIGINAL_W + 7, ORIGINAL_H + 7);
+        g.drawRect(ORIGINAL_X - 3, ORIGINAL_Y - 2, ORIGINAL_W + 5, ORIGINAL_H + 3);
         g.setColor(new Color(255, 230, 140));
-        g.drawRect(ORIGINAL_X - 2, ORIGINAL_Y - 2, ORIGINAL_W + 3, ORIGINAL_H + 3);
+        g.drawRect(ORIGINAL_X - 1, ORIGINAL_Y - 1, ORIGINAL_W + 1, ORIGINAL_H + 1);
 
         if (forgeryPainting.getOriginalImage() != null) {
             g.drawImage(forgeryPainting.getOriginalImage(), ORIGINAL_X, ORIGINAL_Y, ORIGINAL_W, ORIGINAL_H, null);
         }
 
-        // Eyedropper hint under original
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-        g.setColor(new Color(215, 195, 170));
-        g.drawString("Tip: Click any color on the original to sample with eyedropper", ORIGINAL_X, ORIGINAL_Y + ORIGINAL_H + 13);
-
         // --- RIGHT: FORGERY CANVAS ---
-        // Header above canvas
-        g.setColor(new Color(36, 26, 18));
-        g.fillRoundRect(FORGERY_CANVAS_X, FORGERY_CANVAS_Y - 18, FORGERY_CANVAS_W, 16, 4, 4);
-        g.setColor(new Color(195, 155, 75));
-        g.drawRoundRect(FORGERY_CANVAS_X, FORGERY_CANVAS_Y - 18, FORGERY_CANVAS_W, 16, 4, 4);
-
-        g.setFont(new Font("Monospaced", Font.BOLD, 9));
-        g.setColor(new Color(255, 230, 140));
-        drawCentered(g, "✎ FORGER'S WORKBENCH — OIL ON LINEN CANVAS",
-            FORGERY_CANVAS_X + FORGERY_CANVAS_W / 2, FORGERY_CANVAS_Y - 6);
-
         // Drop shadow behind canvas
         g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(FORGERY_CANVAS_X - 6 + 4, FORGERY_CANVAS_Y - 6 + 4, FORGERY_CANVAS_W + 12, FORGERY_CANVAS_H + 12);
+        g.fillRect(FORGERY_CANVAS_X - 6 + 4, FORGERY_CANVAS_Y - 5 + 4, FORGERY_CANVAS_W + 12, FORGERY_CANVAS_H + 10);
 
         // Canvas wooden stretcher frame
         g.setColor(new Color(38, 28, 20));
-        g.fillRect(FORGERY_CANVAS_X - 6, FORGERY_CANVAS_Y - 6, FORGERY_CANVAS_W + 12, FORGERY_CANVAS_H + 12);
+        g.fillRect(FORGERY_CANVAS_X - 6, FORGERY_CANVAS_Y - 5, FORGERY_CANVAS_W + 12, FORGERY_CANVAS_H + 10);
         g.setColor(new Color(165, 130, 85));
-        g.drawRect(FORGERY_CANVAS_X - 4, FORGERY_CANVAS_Y - 4, FORGERY_CANVAS_W + 8, FORGERY_CANVAS_H + 8);
+        g.drawRect(FORGERY_CANVAS_X - 4, FORGERY_CANVAS_Y - 3, FORGERY_CANVAS_W + 7, FORGERY_CANVAS_H + 5);
         g.setColor(new Color(110, 85, 55));
-        g.drawRect(FORGERY_CANVAS_X - 2, FORGERY_CANVAS_Y - 2, FORGERY_CANVAS_W + 4, FORGERY_CANVAS_H + 4);
+        g.drawRect(FORGERY_CANVAS_X - 2, FORGERY_CANVAS_Y - 1, FORGERY_CANVAS_W + 3, FORGERY_CANVAS_H + 1);
 
         g.drawImage(forgeryCanvas, FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_W, FORGERY_CANVAS_H, null);
 
         // 4 Canvas spring clips
-        drawCanvasClip(g, FORGERY_CANVAS_X - 4, FORGERY_CANVAS_Y - 4);
-        drawCanvasClip(g, FORGERY_CANVAS_X + FORGERY_CANVAS_W - 14, FORGERY_CANVAS_Y - 4);
-        drawCanvasClip(g, FORGERY_CANVAS_X - 4, FORGERY_CANVAS_Y + FORGERY_CANVAS_H - 8);
-        drawCanvasClip(g, FORGERY_CANVAS_X + FORGERY_CANVAS_W - 14, FORGERY_CANVAS_Y + FORGERY_CANVAS_H - 8);
+        drawCanvasClip(g, FORGERY_CANVAS_X + 18, FORGERY_CANVAS_Y - 5);
+        drawCanvasClip(g, FORGERY_CANVAS_X + FORGERY_CANVAS_W - 36, FORGERY_CANVAS_Y - 5);
+        drawCanvasClip(g, FORGERY_CANVAS_X + 18, FORGERY_CANVAS_Y + FORGERY_CANVAS_H - 7);
+        drawCanvasClip(g, FORGERY_CANVAS_X + FORGERY_CANVAS_W - 36, FORGERY_CANVAS_Y + FORGERY_CANVAS_H - 7);
 
         // Hover cursor circle on canvas
         if (hoverX >= FORGERY_CANVAS_X && hoverX < FORGERY_CANVAS_X + FORGERY_CANVAS_W
@@ -3066,9 +3068,9 @@ public class GamePanel extends JPanel {
         // --- PALETTE SWATCHES (Bottom Left) ---
         // Walnut palette tray backdrop
         g.setColor(new Color(22, 14, 10, 240));
-        g.fillRoundRect(82, 296, 352, 74, 8, 8);
+        g.fillRoundRect(76, 340, 360, 76, 8, 8);
         g.setColor(new Color(145, 105, 55));
-        g.drawRoundRect(82, 296, 352, 74, 8, 8);
+        g.drawRoundRect(76, 340, 360, 76, 8, 8);
 
         Color[] availableColors = getForgeryPaletteList();
         for (int i = 0; i < availableColors.length; i++) {
@@ -3114,9 +3116,9 @@ public class GamePanel extends JPanel {
         // --- TOOLS & BRUSHWORK (Bottom Right) ---
         // Walnut tool tray backdrop
         g.setColor(new Color(22, 14, 10, 240));
-        g.fillRoundRect(502, 296, 352, 74, 8, 8);
+        g.fillRoundRect(524, 340, 360, 76, 8, 8);
         g.setColor(new Color(145, 105, 55));
-        g.drawRoundRect(502, 296, 352, 74, 8, 8);
+        g.drawRoundRect(524, 340, 360, 76, 8, 8);
 
         drawStudioToolButton(g, getForgeryUndoButtonBounds(), "⟲ UNDO", false);
         drawStudioToolButton(g, getForgeryClearButtonBounds(), "✕ CLEAR", false);
@@ -3126,7 +3128,7 @@ public class GamePanel extends JPanel {
         // Brush Sizes
         g.setFont(new Font("Monospaced", Font.BOLD, 10));
         g.setColor(new Color(225, 210, 180));
-        g.drawString("BRUSH SIZE:", 512, 357);
+        g.drawString("BRUSH SIZE:", 534, 399);
 
         int[] sizes = {3, 7, 14, 24};
         String[] sizeLabels = {"3px", "7px", "14px", "24px"};
@@ -3136,18 +3138,18 @@ public class GamePanel extends JPanel {
             drawStudioBrushSizeButton(g, bsb, sizes[i], sizeLabels[i], activeSize);
         }
 
-        // --- FORENSIC APPRAISAL STATION (Bottom Left: y = 380 to 498) ---
-        int appX = 82, appY = 380, appW = 376, appH = 118;
+        // --- FORENSIC APPRAISAL STATION (Bottom Left: y = 428 to 566) ---
+        int appX = 76, appY = 428, appW = 360, appH = 138;
         g.setColor(new Color(20, 15, 18, 240));
         g.fillRoundRect(appX, appY, appW, appH, 8, 8);
         g.setColor(new Color(125, 95, 55));
         g.drawRoundRect(appX, appY, appW, appH, 8, 8);
 
         // 3D Wax Appraisal Seal
-        drawWaxAppraisalSeal(g, appX + 46, appY + appH / 2, 36, forgeryAccuracyPreview);
+        drawWaxAppraisalSeal(g, appX + 54, appY + appH / 2, 38, forgeryAccuracyPreview);
 
         // Match meter bar on right of wax seal
-        int mX = appX + 96, mY = appY + 14, mW = appW - 108, mH = 26;
+        int mX = appX + 112, mY = appY + 12, mW = appW - 124, mH = 26;
         g.setColor(new Color(10, 10, 14));
         g.fillRoundRect(mX, mY, mW, mH, 5, 5);
         g.setColor(new Color(65, 55, 45));
@@ -3172,7 +3174,7 @@ public class GamePanel extends JPanel {
         drawCentered(g, "ACCURACY MATCH: " + forgeryAccuracyPreview + "%", mX + mW / 2, mY + 17);
 
         // Threat Analysis Verdict pill under meter
-        int vX = mX, vY = appY + 48, vW = mW, vH = 58;
+        int vX = mX, vY = appY + 44, vW = mW, vH = 82;
         Color vBg = (forgeryAccuracyPreview >= 80) ? new Color(20, 50, 30, 220)
             : (forgeryAccuracyPreview >= 60) ? new Color(50, 42, 16, 220) : new Color(55, 20, 20, 220);
         Color vBorder = (forgeryAccuracyPreview >= 80) ? new Color(52, 199, 89)
@@ -3187,20 +3189,39 @@ public class GamePanel extends JPanel {
         g.setColor(statusColor);
         String verdictTitle = (forgeryAccuracyPreview >= 80) ? "✔ AUTHENTIC MASTERPIECE"
             : (forgeryAccuracyPreview >= 60) ? "⚠ PASSABLE FORGERY" : "✖ FLAWED COUNTERFEIT";
-        g.drawString(verdictTitle, vX + 10, vY + 18);
+        g.drawString(verdictTitle, vX + 8, vY + 18);
 
         g.setFont(new Font("Monospaced", Font.PLAIN, 9));
         g.setColor(new Color(230, 225, 220));
-        String verdictDesc1 = (forgeryAccuracyPreview >= 80) ? "Guards will inspect and accept without alarm."
-            : (forgeryAccuracyPreview >= 60) ? "Guards may hesitate; alarms sound if suspicious."
-            : "Guards detect immediately and sound the alarm!";
-        g.drawString(verdictDesc1, vX + 10, vY + 34);
+        String verdictDesc1 = (forgeryAccuracyPreview >= 80) ? "Guards inspect and pass calmly."
+            : (forgeryAccuracyPreview >= 60) ? "Minor flaws; alert risk if guard pauses."
+            : "Guards detect immediately and sound alarm!";
+        g.drawString(verdictDesc1, vX + 8, vY + 36);
 
         g.setFont(new Font("Monospaced", Font.PLAIN, 8));
         g.setColor(new Color(175, 170, 165));
-        g.drawString("Thresholds: 60% Passable  •  80% Flawless", vX + 10, vY + 48);
+        g.drawString("Thresholds: 60% Passable • 80% Flawless", vX + 8, vY + 54);
+        g.drawString("Guards inspect art along patrol paths", vX + 8, vY + 68);
 
-        // --- ACTION BUTTONS (Bottom Center/Right) ---
+        // --- HEIST BRIEFING & ACTION BUTTONS (Bottom Right: y = 428 to 566) ---
+        int rightX = 524, rightY = 428, rightW = 360;
+
+        // Strategy Briefing Card
+        int infoH = 60;
+        g.setColor(new Color(24, 20, 26, 230));
+        g.fillRoundRect(rightX, rightY, rightW, infoH, 8, 8);
+        g.setColor(new Color(110, 85, 55));
+        g.drawRoundRect(rightX, rightY, rightW, infoH, 8, 8);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(255, 215, 120));
+        g.drawString("HEIST STRATEGY BRIEFING", rightX + 12, rightY + 18);
+        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setColor(new Color(210, 205, 200));
+        g.drawString("• Swap before timer expires to avoid detection.", rightX + 12, rightY + 34);
+        g.drawString("• High match replicates deceive guards upon inspection.", rightX + 12, rightY + 48);
+
+        // Action Buttons
         drawCustomActionButton(g, getForgeryCancelButtonBounds(), "CANCEL", "ESC", false, new Color(90, 38, 38));
         drawCustomActionButton(g, getForgeryReplaceButtonBounds(), "SWAP & REPLACE", "ENTER", true, new Color(34, 120, 65));
     }
@@ -3293,17 +3314,17 @@ public class GamePanel extends JPanel {
         g.setStroke(new BasicStroke(1.0f));
 
         g.setFont(new Font("Monospaced", Font.BOLD, 8));
-        g.setColor(new Color(255, 225, 190));
-        drawCentered(g, "★ HEIST ★", cx, cy - 14);
+        g.setColor(new Color(255, 230, 200));
+        drawCentered(g, "★ SEAL ★", cx, cy - 13);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 15));
+        g.setFont(new Font("Monospaced", Font.BOLD, 14));
         g.setColor(Color.WHITE);
         drawCentered(g, accuracy + "%", cx, cy + 2);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 8));
         String stamp = accuracy >= 80 ? "MASTER" : accuracy >= 60 ? "PASS" : "FAKE";
-        g.setColor(accuracy >= 80 ? new Color(255, 235, 160) : new Color(255, 205, 190));
-        drawCentered(g, stamp, cx, cy + 15);
+        g.setColor(accuracy >= 80 ? new Color(255, 235, 160) : new Color(255, 210, 195));
+        drawCentered(g, stamp, cx, cy + 14);
     }
 
     private void drawStudioBrushSizeButton(Graphics2D g, Rectangle bounds, int size, String label, boolean highlighted) {
