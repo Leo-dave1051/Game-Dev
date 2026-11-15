@@ -754,7 +754,6 @@ public class GamePanel extends JPanel {
         }
         if (screen == Screen.PLAYING) {
             drawHud(g, game);
-            drawMinimap(g, game);
             drawPrompt(g, game);
         }
     }
@@ -1097,13 +1096,11 @@ public class GamePanel extends JPanel {
     }
 
     private void drawPlayer(Graphics2D g, GameWorld game) {
-        int x = (int) Math.round(game.getPlayerCenterX() - SPRITE_WIDTH / 2.0);
-        int y = (int) Math.round(game.getPlayerBottomY() - SPRITE_HEIGHT);
         if (game.isHidden()) {
-            g.setColor(new Color(10, 12, 16, 120));
-            g.fillOval(x + 5, y + SPRITE_HEIGHT - 9, SPRITE_WIDTH - 10, 10);
             return;
         }
+        int x = (int) Math.round(game.getPlayerCenterX() - SPRITE_WIDTH / 2.0);
+        int y = (int) Math.round(game.getPlayerBottomY() - SPRITE_HEIGHT);
         g.setColor(new Color(0, 0, 0, 110));
         g.fillOval(x + 8, y + SPRITE_HEIGHT - 8, SPRITE_WIDTH - 16, 7);
         BufferedImage frame = getTintedPlayerFrame(getPlayerSpriteFrame(game), levelManager.getSelectedOutfit());
@@ -1320,24 +1317,36 @@ public class GamePanel extends JPanel {
         g.fillRect(0, 66, WIDTH, 2);
 
         // 1. BRAND & MISSION (Left)
-        g.setFont(new Font("Monospaced", Font.BOLD, 18));
+        g.setFont(new Font("Monospaced", Font.BOLD, 17));
         g.setColor(new Color(255, 222, 135));
-        g.drawString("PAINTHEIST", 18, 26);
+        g.drawString("PAINTHEIST", 16, 25);
 
         String levelName = world != null && world.getLevel() != null ? world.getLevel().getName().toUpperCase() : "GALLERY";
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
-        g.setColor(new Color(175, 165, 180));
-        g.drawString(levelName, 18, 42);
+        if (levelName.length() > 20) levelName = levelName.substring(0, 18) + "..";
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setColor(new Color(175, 185, 205));
+        g.drawString(levelName, 16, 39);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
-        g.setColor(new Color(125, 120, 135));
-        g.drawString("WASD MOVE  SHIFT SPRINT  CTRL SNEAK  E FORGE  Q COIN  P PAUSE", 18, 57);
+        // Subtle infiltration status badge (compact: 110px wide, well clear of pill at x=175)
+        g.setColor(new Color(22, 26, 36, 210));
+        g.fillRoundRect(16, 45, 110, 16, 4, 4);
+        g.setColor(new Color(45, 55, 75));
+        g.drawRoundRect(16, 45, 110, 16, 4, 4);
+        Color statusDotColor = game.getSuspicion() == 0 ? new Color(46, 204, 113)
+            : game.getSuspicion() < 60 ? new Color(241, 196, 15) : new Color(231, 76, 60);
+        g.setColor(statusDotColor);
+        g.fillOval(22, 50, 6, 6);
+        g.setFont(new Font("Monospaced", Font.BOLD, 8));
+        g.setColor(new Color(215, 225, 235));
+        String statusText = game.getSuspicion() == 0 ? "INFILTRATING"
+            : game.getSuspicion() < 60 ? "INVESTIGATING" : "HIGH ALERT";
+        g.drawString(statusText, 32, 57);
 
         // 2. HEIST OBJECTIVE PILL
         int objX = 175;
-        int objY = 13;
+        int objY = 12;
         int objW = 185;
-        int objH = 42;
+        int objH = 44;
         boolean allStolen = game.getStolenCount() == game.getTargetCount();
         Color objBg = allStolen ? new Color(18, 48, 30, 220) : new Color(24, 27, 38, 220);
         Color objBorder = allStolen ? new Color(52, 199, 89) : new Color(55, 65, 85);
@@ -1354,17 +1363,17 @@ public class GamePanel extends JPanel {
         if (allStolen) {
             double pulse = (Math.sin(animationFrame * 0.2) + 1.0) / 2.0;
             g.setColor(new Color(130 + (int)(125 * pulse), 255, 150));
-            g.drawString("ESCAPE TO THE EXIT!", objX + 10, objY + 33);
+            g.drawString("ESCAPE TO THE EXIT!", objX + 10, objY + 34);
         } else {
             g.setColor(Color.WHITE);
-            g.drawString("FORGE & SWAP ARTWORK", objX + 10, objY + 33);
+            g.drawString("FORGE & SWAP ARTWORK", objX + 10, objY + 34);
         }
 
         // 3. TARGET ART SATCHEL (Visual Mini Frames)
-        int satchelX = 372;
-        int satchelY = 13;
-        int satchelW = 120;
-        int satchelH = 42;
+        int satchelX = 368;
+        int satchelY = 12;
+        int satchelW = 122;
+        int satchelH = 44;
         g.setColor(new Color(24, 27, 38, 220));
         g.fillRoundRect(satchelX, satchelY, satchelW, satchelH, 8, 8);
         g.setColor(new Color(55, 65, 85));
@@ -1372,38 +1381,38 @@ public class GamePanel extends JPanel {
 
         g.setFont(new Font("Monospaced", Font.BOLD, 9));
         g.setColor(new Color(180, 190, 205));
-        g.drawString("LOOT SATCHEL (" + game.getStolenCount() + "/" + game.getTargetCount() + ")", satchelX + 8, satchelY + 15);
+        g.drawString("LOOT SATCHEL (" + game.getStolenCount() + "/" + game.getTargetCount() + ")", satchelX + 8, satchelY + 16);
 
         // Draw mini frames for each painting
         int targetCount = Math.min(5, game.getTargetCount());
         for (int i = 0; i < targetCount; i++) {
-            int fx = satchelX + 10 + i * 21;
-            int fy = satchelY + 20;
+            int fx = satchelX + 9 + i * 22;
+            int fy = satchelY + 22;
             boolean stolen = i < game.getStolenCount();
             g.setColor(new Color(12, 14, 20));
-            g.fillRect(fx, fy, 17, 13);
+            g.fillRect(fx, fy, 18, 14);
             if (stolen) {
                 g.setColor(new Color(38, 166, 91));
-                g.fillRect(fx + 2, fy + 2, 13, 9);
+                g.fillRect(fx + 2, fy + 2, 14, 10);
                 g.setColor(new Color(255, 215, 0));
-                g.drawRect(fx, fy, 17, 13);
+                g.drawRect(fx, fy, 18, 14);
                 g.setColor(Color.WHITE);
                 g.setFont(new Font("Monospaced", Font.BOLD, 8));
-                g.drawString("✓", fx + 4, fy + 10);
+                g.drawString("✓", fx + 5, fy + 11);
             } else {
                 g.setColor(new Color(95, 80, 60));
-                g.drawRect(fx, fy, 17, 13);
+                g.drawRect(fx, fy, 18, 14);
                 g.setColor(new Color(140, 130, 120));
                 g.setFont(new Font("Monospaced", Font.BOLD, 8));
-                g.drawString("?", fx + 6, fy + 10);
+                g.drawString("?", fx + 6, fy + 11);
             }
         }
 
         // 4. MISSION CHRONOMETER
-        int timeX = 502;
-        int timeY = 13;
-        int timeW = 105;
-        int timeH = 42;
+        int timeX = 498;
+        int timeY = 12;
+        int timeW = 104;
+        int timeH = 44;
         boolean lowTime = game.getTimeLeft() < 30;
         Color timeBg = lowTime ? new Color(48, 18, 20, 230) : new Color(18, 22, 32, 230);
         Color timeBorder = lowTime ? new Color(230, 60, 60) : new Color(55, 68, 90);
@@ -1414,18 +1423,18 @@ public class GamePanel extends JPanel {
 
         g.setFont(new Font("Monospaced", Font.BOLD, 9));
         g.setColor(lowTime ? new Color(255, 140, 140) : new Color(175, 185, 205));
-        g.drawString("MISSION TIME", timeX + 10, timeY + 15);
+        g.drawString("MISSION TIME", timeX + 10, timeY + 16);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 15));
         g.setColor(lowTime ? new Color(255, 85, 75) : new Color(140, 235, 165));
         String timeStr = String.format("%02d:%02d", game.getTimeLeft() / 60, game.getTimeLeft() % 60);
-        g.drawString(timeStr, timeX + 10, timeY + 34);
+        g.drawString(timeStr, timeX + 10, timeY + 35);
 
         // 5. SECURITY SUSPICION & LED GAUGE
-        int suspX = 617;
-        int suspY = 13;
-        int suspW = 175;
-        int suspH = 42;
+        int suspX = 610;
+        int suspY = 12;
+        int suspW = 180;
+        int suspH = 44;
         g.setColor(new Color(20, 23, 33, 230));
         g.fillRoundRect(suspX, suspY, suspW, suspH, 8, 8);
         g.setColor(new Color(55, 65, 85));
@@ -1437,19 +1446,20 @@ public class GamePanel extends JPanel {
 
         g.setFont(new Font("Monospaced", Font.BOLD, 9));
         g.setColor(new Color(180, 190, 205));
-        g.drawString("SUSPICION " + game.getSuspicion() + "%", suspX + 8, suspY + 15);
+        g.drawString("SUSPICION " + game.getSuspicion() + "%", suspX + 10, suspY + 16);
 
         g.setColor(alertColor);
-        drawCentered(g, "[" + alert + "]", suspX + suspW - 32, suspY + 15);
+        drawCentered(g, "[" + alert + "]", suspX + suspW - 32, suspY + 16);
 
-        // 10-Segment LED Meter
+        // 10-Segment LED Meter centered inside pill
         int segments = 10;
         int lit = (int) Math.round(game.getSuspicion() / 10.0);
-        int barStartX = suspX + 8;
-        int barY = suspY + 22;
         int segW = 14;
         int segH = 11;
         int segGap = 2;
+        int totalMeterW = segments * (segW + segGap) - segGap;
+        int barStartX = suspX + (suspW - totalMeterW) / 2;
+        int barY = suspY + 24;
         for (int i = 0; i < segments; i++) {
             int sx = barStartX + i * (segW + segGap);
             if (i < lit) {
@@ -1465,10 +1475,10 @@ public class GamePanel extends JPanel {
         }
 
         // 6. GADGETS: COIN DISTRACTION & NOISE
-        int gadgetX = 802;
-        int getY = 13;
-        int getW = 140;
-        int getH = 42;
+        int gadgetX = 798;
+        int getY = 12;
+        int getW = 146;
+        int getH = 44;
         g.setColor(new Color(20, 23, 33, 230));
         g.fillRoundRect(gadgetX, getY, getW, getH, 8, 8);
         g.setColor(new Color(55, 65, 85));
@@ -1476,21 +1486,26 @@ public class GamePanel extends JPanel {
 
         double distCd = game.getDistractionCooldown();
         boolean coinReady = distCd <= 0;
+        int coinSize = 20;
+        int cx = gadgetX + 10;
+        int cy = getY + (getH - coinSize) / 2;
         g.setColor(coinReady ? new Color(255, 215, 0) : new Color(130, 135, 145));
-        g.fillOval(gadgetX + 10, getY + 12, 18, 18);
+        g.fillOval(cx, cy, coinSize, coinSize);
+        g.setColor(coinReady ? new Color(210, 165, 20) : new Color(90, 95, 105));
+        g.drawOval(cx, cy, coinSize, coinSize);
         g.setColor(Color.WHITE);
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
-        g.drawString("¢", gadgetX + 16, getY + 25);
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.drawString("¢", cx + 7, cy + 14);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 10));
         g.setColor(coinReady ? new Color(130, 240, 160) : new Color(200, 190, 205));
-        String coinStr = coinReady ? "Q: COIN READY" : "Q: " + (int) Math.ceil(distCd) + "s COOLDOWN";
-        g.drawString(coinStr, gadgetX + 34, getY + 24);
+        String coinStr = coinReady ? "Q: COIN READY" : "Q: " + (int) Math.ceil(distCd) + "s CD";
+        g.drawString(coinStr, gadgetX + 36, getY + 20);
 
         int noises = game.getNoiseSystem().getEvents().size();
         g.setFont(new Font("Monospaced", Font.BOLD, 8));
         g.setColor(noises == 0 ? new Color(140, 150, 165) : new Color(255, 180, 90));
-        g.drawString("NOISE SENSORS: " + (noises == 0 ? "QUIET" : noises + " DETECTED"), gadgetX + 12, getY + 37);
+        g.drawString(noises == 0 ? "NOISE: QUIET" : "NOISE: " + noises + " HEARD", gadgetX + 36, getY + 34);
     }
 
     private void drawMinimap(Graphics2D g, GameWorld game) {

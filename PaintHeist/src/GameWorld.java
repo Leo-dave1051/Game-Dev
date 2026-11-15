@@ -24,6 +24,7 @@ public final class GameWorld {
     private double distractionCooldown;
     private double distractionEffectTimer;
     private double passageCooldown;
+    private double hideCooldown;
     private double distractionX;
     private double distractionY;
     private double facingX;
@@ -90,6 +91,7 @@ public final class GameWorld {
         distractionCooldown = Math.max(0, distractionCooldown - dt);
         distractionEffectTimer = Math.max(0, distractionEffectTimer - dt);
         passageCooldown = Math.max(0, passageCooldown - dt);
+        hideCooldown = Math.max(0, hideCooldown - dt);
         noiseSystem.update(dt);
         messageTimer = Math.max(0, messageTimer - dt);
         if (messageTimer == 0) message = "";
@@ -106,7 +108,7 @@ public final class GameWorld {
             SoundEffects.play(SoundEffects.Cue.PASSAGE);
             showMessage("Hidden passage discovered: " + approachedPassage.getName() + ".", 2.8);
         }
-        interactPressed = interactPressed || input.interactPressed || input.interact;
+        interactPressed = interactPressed || input.interactPressed;
         stealPressed = stealPressed || input.stealPressed;
         distractPressed = distractPressed || input.distractPressed;
 
@@ -117,11 +119,17 @@ public final class GameWorld {
             moving = false;
             sprinting = false;
             sneaking = false;
-            if (interactPressed) {
+            boolean moveKey = input.up || input.down || input.left || input.right;
+            if (hideCooldown <= 0 && (interactPressed || moveKey)) {
                 hidingIn = null;
-                makeNoise(105, 0.45);
+                hideCooldown = 0.35;
+                interactPressed = false;
+                makeNoise(80, 0.3);
                 SoundEffects.play(SoundEffects.Cue.HIDE);
-                showMessage("Out of hiding. Keep to the shadows.", 2.0);
+                showMessage("Stepped out of hiding. Keep to the shadows.", 1.8);
+                if (moveKey) {
+                    movePlayer(dt, input);
+                }
             }
         } else if (interactPressed && nearbySecretPassage != null
             && !nearbySecretPassage.isDiscovered()) {
@@ -131,8 +139,10 @@ public final class GameWorld {
                 SoundEffects.play(SoundEffects.Cue.PASSAGE);
                 showMessage("Hidden passage discovered: " + discovered.getName() + ".", 2.8);
             }
-        } else if (interactPressed && nearbyHideSpot != null) {
+        } else if (interactPressed && nearbyHideSpot != null && hideCooldown <= 0) {
             hidingIn = nearbyHideSpot;
+            hideCooldown = 0.35;
+            interactPressed = false;
             makeNoise(75, 0.25);
             SoundEffects.play(SoundEffects.Cue.HIDE);
             showMessage("Hidden. Guards cannot see you here.", 2.0);
@@ -536,7 +546,7 @@ public final class GameWorld {
 
     public String getPrompt() {
         if (!message.isEmpty()) return message;
-        if (hidingIn != null) return "HIDDEN IN " + hidingIn.getName().toUpperCase() + "  -  E TO LEAVE";
+        if (hidingIn != null) return "E  EXIT " + hidingIn.getName().toUpperCase() + "  (OR MOVE TO STEP OUT)";
         if (nearbyHideSpot != null) return "E  HIDE IN " + nearbyHideSpot.getName().toUpperCase();
         if (nearbySecretPassage != null) {
             if (nearbySecretPassage.isDiscovered()) return "HIDDEN ROUTE: " + nearbySecretPassage.getName().toUpperCase()
