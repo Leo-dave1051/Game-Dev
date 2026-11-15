@@ -134,6 +134,9 @@ public class GamePanel extends JPanel {
     private int hoverX = -1;
     private int hoverY = -1;
     private String uiToast = "";
+    private int gallerySelectedWing = 0;
+    private String galleryInspectedPainting = null;
+    private int customizePreviewDirection = 0;
     private MuseumMap.Painting forgeryPainting;
     private BufferedImage forgeryCanvas;
     private final java.util.List<BufferedImage> forgeryUndoList = new java.util.ArrayList<>();
@@ -262,13 +265,23 @@ public class GamePanel extends JPanel {
                 clickable = (level >= 0 && levelManager.isUnlocked(level))
                     || buttonBounds(390, 510).contains(hoverX, hoverY);
             } else if (screen == Screen.SHOP) {
-                clickable = shopItemAt(hoverX, hoverY) >= 0 || buttonBounds(390, 505).contains(hoverX, hoverY);
+                clickable = shopItemAt(hoverX, hoverY) >= 0 || buttonBounds(390, 508).contains(hoverX, hoverY);
             } else if (screen == Screen.CUSTOMIZE) {
-                clickable = outfitCardAt(hoverX, hoverY) >= 0 || buttonBounds(390, 505).contains(hoverX, hoverY);
+                clickable = outfitCardAt(hoverX, hoverY) >= 0
+                    || customizeRotateLeftBounds().contains(hoverX, hoverY)
+                    || customizeRotateRightBounds().contains(hoverX, hoverY)
+                    || buttonBounds(390, 508).contains(hoverX, hoverY);
             } else if (screen == Screen.SETTINGS) {
-                clickable = settingsRowAt(hoverX, hoverY) >= 0 || buttonBounds(390, 505).contains(hoverX, hoverY);
+                clickable = settingsRowAt(hoverX, hoverY) >= 0 || buttonBounds(390, 508).contains(hoverX, hoverY);
             } else if (screen == Screen.GALLERY) {
-                clickable = buttonBounds(390, 505).contains(hoverX, hoverY);
+                if (galleryInspectedPainting != null) {
+                    clickable = galleryInspectCloseBounds().contains(hoverX, hoverY)
+                        || !new Rectangle(150, 35, 660, 530).contains(hoverX, hoverY);
+                } else {
+                    clickable = galleryWingTabAt(hoverX, hoverY) >= 0
+                        || galleryPaintingAt(hoverX, hoverY) != null
+                        || buttonBounds(390, 508).contains(hoverX, hoverY);
+                }
             } else if (screen == Screen.PAUSED) {
                 clickable = buttonBounds(390, PAUSE_BTN_CONTINUE_Y).contains(hoverX, hoverY)
                     || buttonBounds(390, PAUSE_BTN_RESTART_Y).contains(hoverX, hoverY)
@@ -504,6 +517,13 @@ public class GamePanel extends JPanel {
             abortForgery();
             return;
         }
+        if (screen == Screen.GALLERY && galleryInspectedPainting != null) {
+            galleryInspectedPainting = null;
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            updateCursor();
+            repaint();
+            return;
+        }
         if (screen == Screen.PLAYING) togglePause();
         else if (screen == Screen.LEVEL_SELECT || screen == Screen.SHOP || screen == Screen.CUSTOMIZE
             || screen == Screen.SETTINGS || screen == Screen.GALLERY) {
@@ -559,30 +579,63 @@ public class GamePanel extends JPanel {
             int item = shopItemAt(x, y);
             if (item >= 0) {
                 handleShopClick(item);
-            } else if (buttonBounds(390, 505).contains(x, y)) {
+            } else if (buttonBounds(390, 508).contains(x, y)) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
                 handleEscape();
             }
         } else if (screen == Screen.CUSTOMIZE) {
-            int outfit = outfitCardAt(x, y);
-            if (outfit >= 0) {
-                handleCustomizeClick(outfit);
-            } else if (buttonBounds(390, 505).contains(x, y)) {
+            if (customizeRotateLeftBounds().contains(x, y)) {
+                customizePreviewDirection = (customizePreviewDirection + 3) % 4;
                 SoundEffects.play(SoundEffects.Cue.CLICK);
-                handleEscape();
+                repaint();
+            } else if (customizeRotateRightBounds().contains(x, y)) {
+                customizePreviewDirection = (customizePreviewDirection + 1) % 4;
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+            } else {
+                int outfit = outfitCardAt(x, y);
+                if (outfit >= 0) {
+                    handleCustomizeClick(outfit);
+                } else if (buttonBounds(390, 508).contains(x, y)) {
+                    SoundEffects.play(SoundEffects.Cue.CLICK);
+                    handleEscape();
+                }
             }
         } else if (screen == Screen.SETTINGS) {
             int row = settingsRowAt(x, y);
             if (row >= 0) {
                 handleSettingsClick(row);
-            } else if (buttonBounds(390, 505).contains(x, y)) {
+            } else if (buttonBounds(390, 508).contains(x, y)) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
                 handleEscape();
             }
         } else if (screen == Screen.GALLERY) {
-            if (buttonBounds(390, 505).contains(x, y)) {
-                SoundEffects.play(SoundEffects.Cue.CLICK);
-                handleEscape();
+            if (galleryInspectedPainting != null) {
+                if (galleryInspectCloseBounds().contains(x, y) || !new Rectangle(150, 35, 660, 530).contains(x, y)) {
+                    galleryInspectedPainting = null;
+                    SoundEffects.play(SoundEffects.Cue.CLICK);
+                    updateCursor();
+                    repaint();
+                }
+            } else {
+                int wing = galleryWingTabAt(x, y);
+                if (wing >= 0) {
+                    gallerySelectedWing = wing;
+                    SoundEffects.play(SoundEffects.Cue.CLICK);
+                    updateCursor();
+                    repaint();
+                } else {
+                    String clickedPainting = galleryPaintingAt(x, y);
+                    if (clickedPainting != null) {
+                        galleryInspectedPainting = clickedPainting;
+                        SoundEffects.play(SoundEffects.Cue.CLICK);
+                        updateCursor();
+                        repaint();
+                    } else if (buttonBounds(390, 508).contains(x, y)) {
+                        SoundEffects.play(SoundEffects.Cue.CLICK);
+                        handleEscape();
+                    }
+                }
             }
         } else if (screen == Screen.LEVEL_SELECT) {
             int clicked = levelAt(x, y);
@@ -1742,7 +1795,7 @@ public class GamePanel extends JPanel {
     private Rectangle shopItemBounds(int index) {
         int col = index / 3;
         int row = index % 3;
-        return new Rectangle(92 + col * 404, 148 + row * 102, 372, 92);
+        return new Rectangle(64 + col * 432, 110 + row * 122, 400, 112);
     }
 
     private int shopItemAt(int x, int y) {
@@ -1774,7 +1827,7 @@ public class GamePanel extends JPanel {
             if (levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_SWITCH)) {
                 uiToast = "CIRCUIT JAMMER IS ALREADY OWNED.";
             } else if (levelManager.buyUpgrade(LevelManager.UPGRADE_LONG_SWITCH, 25)) {
-                uiToast = "UNLOCKED CIRCUIT JAMMER (+5s SWITCH TIME)!";
+                uiToast = "UNLOCKED CIRCUIT JAMMER (+5S SWITCH TIME)!";
             } else {
                 uiToast = "NEED 25 CREDITS FOR CIRCUIT JAMMER.";
             }
@@ -1793,19 +1846,100 @@ public class GamePanel extends JPanel {
         repaint();
     }
 
+    private void drawGadgetIcon(Graphics2D g, int id, int cx, int cy, int size) {
+        if (id == 0) {
+            // Quick Forger: Pocket Chronometer
+            int r = size / 2;
+            g.setColor(new Color(220, 175, 65));
+            g.fillOval(cx - r, cy - r, size, size);
+            g.setColor(new Color(255, 248, 220));
+            g.fillOval(cx - r + 3, cy - r + 3, size - 6, size - 6);
+            g.setColor(new Color(70, 50, 20));
+            g.drawOval(cx - r, cy - r, size, size);
+            g.setStroke(new BasicStroke(2.0f));
+            g.drawLine(cx, cy, cx - 7, cy - 8);
+            g.drawLine(cx, cy, cx + 9, cy - 5);
+            g.setStroke(new BasicStroke(1.0f));
+            g.setColor(new Color(220, 175, 65));
+            g.fillRect(cx - 3, cy - r - 4, 6, 4);
+            g.drawOval(cx - 5, cy - r - 8, 10, 6);
+        } else if (id == 1) {
+            // Long Pitch: Distraction Coin with velocity trail
+            int cr = size / 3;
+            g.setColor(new Color(110, 220, 240, 180));
+            g.drawArc(cx - 18, cy - 10, 36, 26, 40, 150);
+            g.drawArc(cx - 14, cy - 6, 28, 20, 40, 140);
+            g.setColor(new Color(255, 215, 0));
+            g.fillOval(cx - cr + 4, cy - cr - 2, cr * 2, cr * 2);
+            g.setColor(new Color(180, 130, 20));
+            g.drawOval(cx - cr + 4, cy - cr - 2, cr * 2, cr * 2);
+            g.setColor(new Color(60, 40, 10));
+            g.setFont(new Font("Monospaced", Font.BOLD, 11));
+            g.drawString("¢", cx + 1, cy + 4);
+        } else {
+            // Circuit Jammer: Tactical EMP Unit
+            int bw = size - 12;
+            int bh = size - 8;
+            g.setColor(new Color(30, 42, 58));
+            g.fillRoundRect(cx - bw / 2, cy - bh / 2, bw, bh, 5, 5);
+            g.setColor(new Color(56, 189, 248));
+            g.drawRoundRect(cx - bw / 2, cy - bh / 2, bw, bh, 5, 5);
+            g.drawLine(cx - bw / 2 + 4, cy - 4, cx - 2, cy - 4);
+            g.drawLine(cx - 2, cy - 4, cx - 2, cy + 6);
+            g.drawLine(cx + bw / 2 - 4, cy + 4, cx + 2, cy + 4);
+            int[] lx = {cx, cx - 4, cx + 1, cx - 1, cx + 5, cx};
+            int[] ly = {cy - 10, cy - 1, cy - 1, cy + 9, cy, cy};
+            g.setColor(new Color(255, 240, 120));
+            g.fillPolygon(lx, ly, 6);
+        }
+    }
+
+    private void drawDisguiseMannequin(Graphics2D g, int outfitIndex, int cx, int cy) {
+        g.setColor(new Color(10, 10, 14, 180));
+        g.fillOval(cx - 18, cy + 18, 36, 10);
+        g.setColor(new Color(140, 110, 60));
+        g.drawOval(cx - 16, cy + 19, 32, 8);
+
+        if (playerSpriteFrames != null && playerSpriteFrames.length > 0 && playerSpriteFrames[0].length > 0) {
+            int frame = (int) (animationFrame / 8 % SPRITE_STRIP_FRAME_COUNT);
+            BufferedImage base = playerSpriteFrames[ACTION_ROW_START[WALK_ACTION]][frame];
+            BufferedImage tinted = getTintedPlayerFrame(base, outfitIndex);
+            Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g.drawImage(tinted, cx - 24, cy - 30, 48, 56, null);
+            if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
+        }
+    }
+
     private void drawShop(Graphics2D g) {
         drawBackdrop(g);
-        g.setFont(new Font("Monospaced", Font.BOLD, 28));
-        g.setColor(new Color(255, 220, 144));
-        drawCentered(g, "BLACK MARKET SHOP", WIDTH / 2, 92);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        g.setColor(new Color(231, 190, 105));
-        drawCentered(g, "AVAILABLE HEIST CREDITS: " + levelManager.getTotalRewards(), WIDTH / 2, 118);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
-        g.setColor(new Color(180, 174, 188));
-        g.drawString("HEIST GADGETS", 92, 139);
-        g.drawString("THIEF DISGUISES", 496, 139);
+        // Header Title
+        g.setFont(new Font("Monospaced", Font.BOLD, 24));
+        g.setColor(new Color(255, 222, 140));
+        drawCentered(g, "BLACK MARKET FENCE & ATELIER", WIDTH / 2, 56);
+
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setColor(new Color(195, 185, 205));
+        drawCentered(g, "Contraband equipment & custom operative cloaks for master heists.", WIDTH / 2, 72);
+
+        // Heist Credits Badge Pill
+        int credW = 210, credH = 22;
+        int credX = (WIDTH - credW) / 2, credY = 80;
+        g.setColor(new Color(24, 22, 32, 230));
+        g.fillRoundRect(credX, credY, credW, credH, 8, 8);
+        g.setColor(new Color(180, 140, 70));
+        g.drawRoundRect(credX, credY, credW, credH, 8, 8);
+
+        g.setColor(new Color(255, 215, 0));
+        g.fillOval(credX + 10, credY + 3, 16, 16);
+        g.setColor(new Color(40, 30, 10));
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.drawString("¢", credX + 15, credY + 15);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(new Color(255, 235, 175));
+        g.drawString("HEIST CREDITS: " + levelManager.getTotalRewards() + " CR", credX + 34, credY + 16);
 
         String[] names = {
             "QUICK FORGER", "LONG PITCH", "CIRCUIT JAMMER",
@@ -1814,12 +1948,12 @@ public class GamePanel extends JPanel {
             LevelManager.OUTFIT_NAMES[3].toUpperCase()
         };
         String[] descs = {
-            "Adds +30s bonus replication time in Forgery Studio",
-            "Throw coin distractions 35% farther",
-            "Laser switches stay offline 5s longer",
-            "Ruby coat tint for bold midnight heists",
-            "Jade coat tint for stealth specialists",
-            "Gold trim coat for master art thieves"
+            "+30s replication time in Studio",
+            "Throw distraction coins 35% farther",
+            "Security switches offline 5s longer",
+            "Velvet ruby cloak for midnight heists",
+            "Specialist jade weave for ghost runs",
+            "Gold trim trophy coat for legends"
         };
         int[] costs = {
             20, 15, 25,
@@ -1838,46 +1972,113 @@ public class GamePanel extends JPanel {
             Rectangle card = shopItemBounds(i);
             boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
             boolean equipped = i >= 3 && levelManager.getSelectedOutfit() == (i - 2);
-            g.setColor(equipped ? new Color(68, 56, 46)
-                : hovered ? new Color(54, 48, 60) : new Color(34, 32, 41));
-            g.fillRect(card.x, card.y, card.width, card.height);
-            g.setColor(equipped || hovered ? GOLD : owned[i] ? new Color(116, 168, 128) : new Color(102, 87, 74));
-            g.drawRect(card.x, card.y, card.width, card.height);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 14));
-            g.setColor(new Color(255, 227, 168));
-            g.drawString(names[i], card.x + 14, card.y + 26);
+            g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
+            g.fillRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+            g.setColor(equipped ? new Color(245, 215, 120) : hovered ? GOLD : owned[i] ? new Color(110, 160, 120) : new Color(90, 75, 65));
+            g.drawRoundRect(card.x, card.y, card.width, card.height, 10, 10);
 
-            String status = equipped ? "EQUIPPED" : owned[i] ? "OWNED" : costs[i] + " CR";
-            g.setFont(new Font("Monospaced", Font.BOLD, 12));
-            g.setColor(equipped || owned[i] ? new Color(137, 226, 161) : new Color(240, 198, 113));
-            FontMetrics fm = g.getFontMetrics();
-            g.drawString(status, card.x + card.width - 14 - fm.stringWidth(status), card.y + 26);
+            // Left icon / showcase box (x + 10, y + 10, 80, 94)
+            int ibx = card.x + 10, iby = card.y + 10, ibw = 80, ibh = 94;
+            g.setColor(new Color(16, 14, 20));
+            g.fillRoundRect(ibx, iby, ibw, ibh, 6, 6);
+            g.setColor(new Color(60, 50, 45));
+            g.drawRoundRect(ibx, iby, ibw, ibh, 6, 6);
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
-            g.setColor(new Color(195, 190, 202));
-            g.drawString(descs[i], card.x + 14, card.y + 52);
+            if (i < 3) {
+                drawGadgetIcon(g, i, ibx + ibw / 2, iby + ibh / 2, 48);
+            } else {
+                drawDisguiseMannequin(g, i - 2, ibx + ibw / 2, iby + ibh / 2 + 10);
+            }
+
+            // Right content
+            int tx = card.x + 100;
+            g.setFont(new Font("Monospaced", Font.BOLD, 13));
+            g.setColor(new Color(255, 225, 155));
+            g.drawString(names[i], tx, card.y + 26);
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            g.setColor(i < 3 ? new Color(110, 230, 180) : new Color(245, 175, 80));
+            g.drawString(i < 3 ? "[TACTICAL GADGET]" : "[THIEF DISGUISE]", tx, card.y + 40);
 
             g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-            g.setColor(new Color(145, 140, 155));
-            String hint = i < 3
-                ? (owned[i] ? "ACTIVE ON ALL HEISTS" : "CLICK TO BUY FOR " + costs[i] + " CREDITS")
-                : (equipped ? "CURRENTLY WORN" : owned[i] ? "CLICK TO EQUIP" : "CLICK TO UNLOCK FOR " + costs[i] + " CREDITS");
-            g.drawString(hint, card.x + 14, card.y + 76);
+            g.setColor(new Color(195, 190, 205));
+            g.drawString(descs[i], tx, card.y + 57);
+
+            // Interactive Button Pill
+            int btnX = tx;
+            int btnY = card.y + 72;
+            int btnW = 180;
+            int btnH = 28;
+
+            if (equipped) {
+                g.setColor(new Color(25, 65, 38));
+                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setColor(new Color(65, 215, 120));
+                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                g.setColor(new Color(130, 255, 170));
+                drawCentered(g, "✔ CURRENTLY WORN", btnX + btnW / 2, btnY + 18);
+            } else if (owned[i]) {
+                if (i < 3) {
+                    g.setColor(new Color(22, 38, 30));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setColor(new Color(55, 130, 85));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(120, 215, 160));
+                    drawCentered(g, "✔ PERMANENT ACTIVE", btnX + btnW / 2, btnY + 18);
+                } else {
+                    g.setColor(hovered ? new Color(85, 68, 45) : new Color(60, 48, 32));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setColor(new Color(235, 195, 105));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(255, 235, 170));
+                    drawCentered(g, "✦ EQUIP DISGUISE", btnX + btnW / 2, btnY + 18);
+                }
+            } else {
+                boolean canAfford = levelManager.getTotalRewards() >= costs[i];
+                if (canAfford) {
+                    g.setColor(hovered ? new Color(130, 95, 30) : new Color(100, 72, 20));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setColor(new Color(255, 215, 100));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(255, 245, 210));
+                    drawCentered(g, "💰 UNLOCK - " + costs[i] + " CR", btnX + btnW / 2, btnY + 18);
+                } else {
+                    g.setColor(new Color(28, 26, 32));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setColor(new Color(70, 65, 75));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(145, 140, 150));
+                    drawCentered(g, "🔒 NEED " + costs[i] + " CR", btnX + btnW / 2, btnY + 18);
+                }
+            }
         }
 
         if (!uiToast.isEmpty()) {
             g.setFont(new Font("Monospaced", Font.BOLD, 12));
-            g.setColor(new Color(255, 224, 146));
-            drawCentered(g, uiToast, WIDTH / 2, 480);
+            g.setColor(new Color(255, 225, 140));
+            drawCentered(g, uiToast, WIDTH / 2, 492);
         }
-        drawButton(g, "BACK", 390, 505, false);
+        drawButton(g, "BACK", 390, 508, false);
+    }
+
+    private Rectangle customizeRotateLeftBounds() {
+        return new Rectangle(100, 371, 104, 30);
+    }
+
+    private Rectangle customizeRotateRightBounds() {
+        return new Rectangle(214, 371, 104, 30);
     }
 
     private Rectangle outfitCardBounds(int index) {
         int col = index % 2;
         int row = index / 2;
-        return new Rectangle(356 + col * 262, 154 + row * 154, 246, 138);
+        return new Rectangle(350 + col * 270, 106 + row * 174, 260, 160);
     }
 
     private int outfitCardAt(int x, int y) {
@@ -1902,85 +2103,155 @@ public class GamePanel extends JPanel {
 
     private void drawCustomize(Graphics2D g) {
         drawBackdrop(g);
-        g.setFont(new Font("Monospaced", Font.BOLD, 28));
+        g.setFont(new Font("Monospaced", Font.BOLD, 26));
         g.setColor(new Color(255, 220, 144));
-        drawCentered(g, "CUSTOMIZE THIEF", WIDTH / 2, 92);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        g.setColor(new Color(215, 207, 215));
-        drawCentered(g, "Choose your disguise.   CREDITS: " + levelManager.getTotalRewards(), WIDTH / 2, 118);
+        drawCentered(g, "SAFEHOUSE ATELIER: CUSTOMIZE THIEF", WIDTH / 2, 60);
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setColor(new Color(195, 185, 205));
+        drawCentered(g, "Rotate your operative in the mirror. Choose your undercover heist cloak.   CREDITS: "
+            + levelManager.getTotalRewards() + " CR", WIDTH / 2, 78);
 
         int selected = levelManager.getSelectedOutfit();
-        g.setColor(new Color(32, 30, 39));
-        g.fillRect(92, 154, 240, 292);
+
+        // 1. Safehouse Dressing Mirror Frame (Left)
+        int mx = 84, my = 106, mw = 246, mh = 356;
+        g.setColor(new Color(24, 22, 30));
+        g.fillRoundRect(mx, my, mw, mh, 10, 10);
         g.setColor(GOLD);
-        g.drawRect(92, 154, 240, 292);
+        g.drawRoundRect(mx, my, mw, mh, 10, 10);
+
         g.setFont(new Font("Monospaced", Font.BOLD, 12));
         g.setColor(new Color(231, 190, 105));
-        drawCentered(g, "LIVE PREVIEW", 212, 180);
+        drawCentered(g, "SAFEHOUSE MIRROR", mx + mw / 2, my + 24);
 
-        BufferedImage baseFrame = (playerSpriteFrames != null && playerSpriteFrames.length > 0 && playerSpriteFrames[0].length > 0)
-            ? playerSpriteFrames[0][0] : null;
-        if (baseFrame != null) {
-            BufferedImage preview = getTintedPlayerFrame(baseFrame, selected);
+        // Circular Pedestal Rug
+        g.setColor(new Color(45, 36, 48));
+        g.fillOval(mx + 43, my + 175, 160, 36);
+        g.setColor(new Color(180, 140, 75));
+        g.drawOval(mx + 47, my + 178, 152, 30);
+
+        // Animated character in the mirror
+        if (playerSpriteFrames != null && playerSpriteFrames.length > 0 && playerSpriteFrames[0].length > 0) {
+            int frame = (int) (animationFrame / 7 % SPRITE_STRIP_FRAME_COUNT);
+            int actionRow = ACTION_ROW_START[WALK_ACTION] + customizePreviewDirection;
+            BufferedImage frameImg = getTintedPlayerFrame(playerSpriteFrames[actionRow][frame], selected);
             Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g.drawImage(preview, 152, 200, 120, 156, null);
+            g.drawImage(frameImg, mx + 68, my + 55, 110, 146, null);
             if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
         }
-        g.setFont(new Font("Monospaced", Font.BOLD, 14));
-        g.setColor(new Color(255, 227, 168));
-        drawCentered(g, LevelManager.OUTFIT_NAMES[selected].toUpperCase(), 212, 392);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
-        g.setColor(new Color(180, 174, 188));
-        drawCentered(g, "ACTIVE DISGUISE", 212, 416);
 
-        Color[] swatches = {
-            new Color(74, 104, 154),
-            new Color(184, 62, 68),
-            new Color(62, 152, 104),
-            new Color(214, 170, 74)
+        // Active outfit name badge
+        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setColor(new Color(255, 230, 165));
+        drawCentered(g, LevelManager.OUTFIT_NAMES[selected].toUpperCase(), mx + mw / 2, my + 236);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setColor(new Color(120, 235, 160));
+        drawCentered(g, "● CURRENTLY WORN IN HEISTS", mx + mw / 2, my + 252);
+
+        // Rotation Buttons below mirror
+        Rectangle rotL = customizeRotateLeftBounds();
+        Rectangle rotR = customizeRotateRightBounds();
+        boolean rotLHover = hoverX >= 0 && hoverY >= 0 && rotL.contains(hoverX, hoverY);
+        boolean rotRHover = hoverX >= 0 && hoverY >= 0 && rotR.contains(hoverX, hoverY);
+
+        g.setColor(rotLHover ? new Color(75, 60, 42) : new Color(42, 36, 48));
+        g.fillRoundRect(rotL.x, rotL.y, rotL.width, rotL.height, 5, 5);
+        g.setColor(new Color(210, 175, 95));
+        g.drawRoundRect(rotL.x, rotL.y, rotL.width, rotL.height, 5, 5);
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setColor(new Color(255, 235, 185));
+        drawCentered(g, "◄ ROTATE", rotL.x + rotL.width / 2, rotL.y + 19);
+
+        g.setColor(rotRHover ? new Color(75, 60, 42) : new Color(42, 36, 48));
+        g.fillRoundRect(rotR.x, rotR.y, rotR.width, rotR.height, 5, 5);
+        g.setColor(new Color(210, 175, 95));
+        g.drawRoundRect(rotR.x, rotR.y, rotR.width, rotR.height, 5, 5);
+        drawCentered(g, "ROTATE ►", rotR.x + rotR.width / 2, rotR.y + 19);
+
+        // 2. Disguise Selection Cards (Right)
+        String[][] outfitFlavors = {
+            {"Midnight operative cloak.", "Blends into gallery shadows."},
+            {"Bold ruby velvet coat.", "Tailored for midnight runs."},
+            {"Specialist jade weave.", "Silent ghost infiltration."},
+            {"Gleaming gold trim coat.", "Attire for heist legends."}
         };
+
         for (int i = 0; i < LevelManager.OUTFIT_NAMES.length; i++) {
             Rectangle card = outfitCardBounds(i);
             boolean unlocked = levelManager.isOutfitUnlocked(i);
             boolean equipped = selected == i;
             boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
-            g.setColor(equipped ? new Color(65, 53, 49) : hovered ? new Color(52, 46, 58) : new Color(35, 34, 41));
-            g.fillRect(card.x, card.y, card.width, card.height);
-            g.setColor(equipped || hovered ? GOLD : unlocked ? new Color(127, 105, 78) : new Color(64, 59, 66));
-            g.drawRect(card.x, card.y, card.width, card.height);
 
-            g.setColor(swatches[i]);
-            g.fillRect(card.x + 16, card.y + 18, 28, 28);
-            g.setColor(new Color(240, 224, 186));
-            g.drawRect(card.x + 16, card.y + 18, 28, 28);
+            g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
+            g.fillRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+            g.setColor(equipped ? GOLD : hovered ? new Color(210, 175, 95) : unlocked ? new Color(110, 150, 115) : new Color(75, 68, 75));
+            g.drawRoundRect(card.x, card.y, card.width, card.height, 8, 8);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 13));
-            g.setColor(unlocked ? new Color(255, 226, 167) : new Color(148, 142, 154));
-            g.drawString(LevelManager.OUTFIT_NAMES[i], card.x + 56, card.y + 37);
+            // Left mini portrait box
+            int pbx = card.x + 12, pby = card.y + 12, pbw = 64, pbh = 78;
+            g.setColor(new Color(16, 14, 20));
+            g.fillRoundRect(pbx, pby, pbw, pbh, 5, 5);
+            g.setColor(new Color(55, 48, 58));
+            g.drawRoundRect(pbx, pby, pbw, pbh, 5, 5);
+            drawDisguiseMannequin(g, i, pbx + pbw / 2, pby + pbh / 2 + 8);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 11));
-            g.setColor(equipped ? new Color(137, 226, 161) : unlocked ? new Color(224, 198, 138) : new Color(216, 146, 110));
-            String tag = equipped ? "EQUIPPED"
-                : unlocked ? "UNLOCKED - CLICK TO EQUIP"
-                : "LOCKED - " + LevelManager.OUTFIT_COSTS[i] + " CR";
-            g.drawString(tag, card.x + 16, card.y + 82);
+            // Right title & perk
+            int tx = card.x + 86;
+            g.setFont(new Font("Monospaced", Font.BOLD, 12));
+            g.setColor(new Color(255, 225, 155));
+            g.drawString(LevelManager.OUTFIT_NAMES[i].toUpperCase(), tx, card.y + 28);
 
             g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-            g.setColor(new Color(165, 160, 174));
-            g.drawString(i == 0 ? "Signature dark midnight cloak." : "Also available in the Shop.", card.x + 16, card.y + 112);
+            g.setColor(new Color(185, 180, 195));
+            g.drawString(outfitFlavors[i][0], tx, card.y + 46);
+            g.drawString(outfitFlavors[i][1], tx, card.y + 60);
+
+            // Action Button
+            int btnX = card.x + 12;
+            int btnY = card.y + 104;
+            int btnW = card.width - 24;
+            int btnH = 42;
+
+            if (equipped) {
+                g.setColor(new Color(25, 65, 38));
+                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setColor(new Color(65, 215, 120));
+                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                g.setColor(new Color(130, 255, 170));
+                drawCentered(g, "✔ CURRENTLY EQUIPPED", btnX + btnW / 2, btnY + 22);
+            } else if (unlocked) {
+                g.setColor(hovered ? new Color(85, 68, 45) : new Color(55, 45, 32));
+                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setColor(new Color(235, 195, 105));
+                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                g.setColor(new Color(255, 235, 170));
+                drawCentered(g, "✦ CLICK TO EQUIP", btnX + btnW / 2, btnY + 22);
+            } else {
+                boolean canAfford = levelManager.getTotalRewards() >= LevelManager.OUTFIT_COSTS[i];
+                g.setColor(canAfford ? (hovered ? new Color(110, 85, 25) : new Color(75, 55, 18)) : new Color(28, 26, 32));
+                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setColor(canAfford ? new Color(255, 215, 100) : new Color(70, 65, 75));
+                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                g.setColor(canAfford ? new Color(255, 245, 210) : new Color(145, 140, 150));
+                drawCentered(g, canAfford ? "💰 UNLOCK - " + LevelManager.OUTFIT_COSTS[i] + " CR" : "🔒 LOCKED - " + LevelManager.OUTFIT_COSTS[i] + " CR", btnX + btnW / 2, btnY + 22);
+            }
         }
 
         if (!uiToast.isEmpty()) {
             g.setFont(new Font("Monospaced", Font.BOLD, 12));
-            g.setColor(new Color(255, 224, 146));
-            drawCentered(g, uiToast, WIDTH / 2, 480);
+            g.setColor(new Color(255, 225, 140));
+            drawCentered(g, uiToast, WIDTH / 2, 492);
         }
-        drawButton(g, "BACK", 390, 505, false);
+        drawButton(g, "BACK", 390, 508, false);
     }
 
     private Rectangle settingsRowBounds(int row) {
-        return new Rectangle(210, 152 + row * 74, 540, 58);
+        return new Rectangle(180, 114 + row * 66, 600, 54);
     }
 
     private int settingsRowAt(int x, int y) {
@@ -2011,97 +2282,470 @@ public class GamePanel extends JPanel {
 
     private void drawSettings(Graphics2D g) {
         drawBackdrop(g);
-        g.setFont(new Font("Monospaced", Font.BOLD, 28));
+        g.setFont(new Font("Monospaced", Font.BOLD, 26));
         g.setColor(new Color(255, 220, 144));
-        drawCentered(g, "SETTINGS", WIDTH / 2, 92);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        g.setColor(new Color(215, 207, 215));
-        drawCentered(g, "Click any option below to toggle.", WIDTH / 2, 118);
+        drawCentered(g, "SETTINGS & CONTROLS", WIDTH / 2, 60);
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setColor(new Color(195, 185, 205));
+        drawCentered(g, "Click any option below to toggle audio and visual preferences.", WIDTH / 2, 78);
 
         String[] labels = {"SOUND EFFECTS", "DISPLAY MODE", "GALLERY LIGHTING"};
-        String[] values = {
-            SoundEffects.isMuted() ? "MUTED" : "ON",
-            Main.isFullScreen() ? "FULL SCREEN" : "WINDOWED",
-            levelManager.isLightingEnabled() ? "DRAMATIC VIGNETTE" : "HIGH VISIBILITY"
+        String[] descs = {
+            "Master environmental and sneaking audio cues",
+            "Toggle between windowed and borderless fullscreen",
+            "Atmospheric dark gallery shadows vs high visibility"
         };
+        boolean[] states = {
+            !SoundEffects.isMuted(),
+            Main.isFullScreen(),
+            levelManager.isLightingEnabled()
+        };
+        String[] stateLabels = {
+            SoundEffects.isMuted() ? "MUTED" : "ENABLED",
+            Main.isFullScreen() ? "FULL SCREEN" : "WINDOWED",
+            levelManager.isLightingEnabled() ? "VIGNETTE" : "HIGH VISIBILITY"
+        };
+
         for (int i = 0; i < 3; i++) {
             Rectangle row = settingsRowBounds(i);
             boolean hovered = hoverX >= 0 && hoverY >= 0 && row.contains(hoverX, hoverY);
-            g.setColor(hovered ? new Color(56, 49, 62) : new Color(35, 34, 41));
-            g.fillRect(row.x, row.y, row.width, row.height);
-            g.setColor(hovered ? GOLD : new Color(127, 105, 78));
-            g.drawRect(row.x, row.y, row.width, row.height);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 14));
-            g.setColor(new Color(255, 227, 168));
-            g.drawString(labels[i], row.x + 22, row.y + 35);
+            g.setColor(hovered ? new Color(45, 40, 52) : new Color(28, 26, 35));
+            g.fillRoundRect(row.x, row.y, row.width, row.height, 8, 8);
+            g.setColor(hovered ? GOLD : new Color(110, 95, 80));
+            g.drawRoundRect(row.x, row.y, row.width, row.height, 8, 8);
 
+            // Left labels
             g.setFont(new Font("Monospaced", Font.BOLD, 13));
-            g.setColor(new Color(137, 226, 161));
-            FontMetrics fm = g.getFontMetrics();
-            g.drawString(values[i], row.x + row.width - 22 - fm.stringWidth(values[i]), row.y + 35);
+            g.setColor(new Color(255, 225, 155));
+            g.drawString(labels[i], row.x + 22, row.y + 24);
+
+            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setColor(new Color(175, 170, 185));
+            g.drawString(descs[i], row.x + 22, row.y + 42);
+
+            // Right Toggle Switch Pill
+            int swW = 140, swH = 32;
+            int swX = row.x + row.width - swW - 20, swY = row.y + (row.height - swH) / 2;
+
+            boolean on = states[i];
+            g.setColor(on ? new Color(25, 65, 38) : new Color(45, 35, 38));
+            g.fillRoundRect(swX, swY, swW, swH, 6, 6);
+            g.setColor(on ? new Color(65, 215, 120) : new Color(180, 90, 90));
+            g.drawRoundRect(swX, swY, swW, swH, 6, 6);
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(on ? new Color(130, 255, 170) : new Color(240, 140, 140));
+            drawCentered(g, (on ? "● " : "○ ") + stateLabels[i], swX + swW / 2, swY + 20);
         }
 
-        g.setColor(new Color(30, 29, 36));
-        g.fillRect(150, 384, 660, 82);
-        g.setColor(new Color(92, 79, 64));
-        g.drawRect(150, 384, 660, 82);
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        // Tactile Keybindings Console
+        int kbx = 120, kby = 320, kbw = 720, kbh = 148;
+        g.setColor(new Color(22, 20, 28));
+        g.fillRoundRect(kbx, kby, kbw, kbh, 8, 8);
+        g.setColor(new Color(85, 75, 68));
+        g.drawRoundRect(kbx, kby, kbw, kbh, 8, 8);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
         g.setColor(new Color(231, 190, 105));
-        drawCentered(g, "CONTROLS", WIDTH / 2, 408);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
-        g.setColor(new Color(205, 198, 208));
-        drawCentered(g, "WASD / ARROWS Move   |   SHIFT Sneak   |   R Sprint   |   E Swap / Hide / Switch", WIDTH / 2, 432);
-        drawCentered(g, "Q Throw Distraction   |   F Secret Passage   |   P Pause   |   M Mute   |   F11 Fullscreen", WIDTH / 2, 452);
+        drawCentered(g, "KEYBOARD & HEIST CONTROLS", kbx + kbw / 2, kby + 22);
+
+        // Cheatsheet items
+        String[][] controls = {
+            {"[WASD / ARROWS]", "Move Operative"},
+            {"[SHIFT]", "Sneak (Silent Footsteps)"},
+            {"[R]", "Sprint (Fast, Loud)"},
+            {"[E]", "Forge, Swap & Hide"},
+            {"[Q]", "Throw Distraction Coin"},
+            {"[P]", "Pause Heist"},
+            {"[M]", "Mute Sound"},
+            {"[F11]", "Toggle Fullscreen"}
+        };
+
+        for (int c = 0; c < controls.length; c++) {
+            int col = c / 4;
+            int r = c % 4;
+            int cx = kbx + 30 + col * 350;
+            int cy = kby + 48 + r * 24;
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(255, 220, 140));
+            g.drawString(controls[c][0], cx, cy);
+
+            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setColor(new Color(195, 190, 205));
+            g.drawString(controls[c][1], cx + 130, cy);
+        }
 
         if (!uiToast.isEmpty()) {
             g.setFont(new Font("Monospaced", Font.BOLD, 12));
-            g.setColor(new Color(255, 224, 146));
-            drawCentered(g, uiToast, WIDTH / 2, 488);
+            g.setColor(new Color(255, 225, 140));
+            drawCentered(g, uiToast, WIDTH / 2, 492);
         }
-        drawButton(g, "BACK", 390, 505, false);
+        drawButton(g, "BACK", 390, 508, false);
+    }
+
+    private Rectangle galleryWingTabBounds(int wing) {
+        int w = 158;
+        int gap = 8;
+        int startX = (WIDTH - (5 * w + 4 * gap)) / 2;
+        return new Rectangle(startX + wing * (w + gap), 82, w, 34);
+    }
+
+    private int galleryWingTabAt(int x, int y) {
+        for (int i = 0; i < 5; i++) {
+            if (galleryWingTabBounds(i).contains(x, y)) return i;
+        }
+        return -1;
+    }
+
+    private Rectangle galleryPaintingBounds(int index, int total) {
+        if (total == 1) {
+            return new Rectangle(120, 126, 720, 240);
+        }
+        int col = index % 2;
+        int row = index / 2;
+        return new Rectangle(64 + col * 428, 124 + row * 174, 404, 162);
+    }
+
+    private String galleryPaintingAt(int x, int y) {
+        MuseumLevel level = MuseumLevel.get(gallerySelectedWing);
+        java.util.List<String> list = level.getPaintingNames();
+        for (int i = 0; i < list.size(); i++) {
+            if (galleryPaintingBounds(i, list.size()).contains(x, y)) {
+                return list.get(i);
+            }
+        }
+        return null;
+    }
+
+    private Rectangle galleryInspectCloseBounds() {
+        return new Rectangle(370, 485, 220, 36);
+    }
+
+    private void drawPictureFrame(Graphics2D g, int fx, int fy, int fw, int fh, String pName, boolean isCollected) {
+        // Baroque gold frame
+        g.setColor(new Color(135, 100, 45));
+        g.fillRoundRect(fx, fy, fw, fh, 6, 6);
+        g.setColor(new Color(235, 195, 105));
+        g.drawRoundRect(fx, fy, fw, fh, 6, 6);
+        g.setColor(new Color(75, 50, 20));
+        g.drawRoundRect(fx + 2, fy + 2, fw - 4, fh - 4, 4, 4);
+
+        drawCornerRivet(g, fx + 5, fy + 5);
+        drawCornerRivet(g, fx + fw - 5, fy + 5);
+        drawCornerRivet(g, fx + 5, fy + fh - 5);
+        drawCornerRivet(g, fx + fw - 5, fy + fh - 5);
+
+        // Canvas inset
+        int cx = fx + 8, cy = fy + 8, cw = fw - 16, ch = fh - 16;
+        g.setColor(new Color(12, 11, 15));
+        g.fillRect(cx, cy, cw, ch);
+
+        if (isCollected) {
+            BufferedImage art = MasterpieceCatalog.getMasterpiece(pName);
+            Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g.drawImage(art, cx, cy, cw, ch, null);
+            if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
+
+            // Overhead soft spotlight cone
+            g.setPaint(new GradientPaint(cx + cw / 2, cy - 8, new Color(255, 240, 180, 50), cx + cw / 2, cy + ch, new Color(255, 240, 180, 0)));
+            int[] spX = {cx + cw / 2 - 14, cx + cw / 2 + 14, cx + cw, cx};
+            int[] spY = {cy, cy, cy + ch, cy + ch};
+            g.fillPolygon(spX, spY, 4);
+        } else {
+            // Velvet shadow drape
+            g.setColor(new Color(22, 20, 28));
+            g.fillRect(cx, cy, cw, ch);
+            g.setColor(new Color(36, 32, 44));
+            for (int ly = cy + 6; ly < cy + ch; ly += 10) g.drawLine(cx + 4, ly, cx + cw - 4, ly);
+
+            int lcx = cx + cw / 2, lcy = cy + ch / 2 - 6;
+            g.setColor(new Color(210, 165, 60));
+            g.fillRoundRect(lcx - 10, lcy, 20, 16, 4, 4);
+            g.setColor(new Color(255, 230, 140));
+            g.drawRoundRect(lcx - 10, lcy, 20, 16, 4, 4);
+            g.setColor(new Color(40, 28, 10));
+            g.fillOval(lcx - 2, lcy + 5, 4, 4);
+            g.drawLine(lcx, lcy + 7, lcx, lcy + 11);
+
+            g.setColor(new Color(210, 165, 60));
+            g.setStroke(new BasicStroke(2.0f));
+            g.drawArc(lcx - 6, lcy - 10, 12, 14, 0, 180);
+            g.setStroke(new BasicStroke(1.0f));
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            g.setColor(new Color(185, 175, 165));
+            drawCentered(g, "UNCLAIMED HEIST", cx + cw / 2, lcy + 28);
+        }
+    }
+
+    private void drawMuseumDossierPlaque(Graphics2D g, int px, int py, int pw, int ph, String pName, int wing, boolean isCollected, int score, int time) {
+        g.setColor(new Color(32, 28, 38));
+        g.fillRoundRect(px, py, pw, ph, 8, 8);
+        g.setColor(new Color(190, 150, 80));
+        g.drawRoundRect(px, py, pw, ph, 8, 8);
+        g.setColor(new Color(75, 55, 30));
+        g.drawRoundRect(px + 2, py + 2, pw - 4, ph - 4, 6, 6);
+
+        int tx = px + 20;
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(210, 175, 100));
+        g.drawString("MUSEUM ACCESSION DOSSIER", tx, py + 26);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 17));
+        g.setColor(new Color(255, 230, 155));
+        g.drawString(pName.toUpperCase(), tx, py + 48);
+
+        g.setFont(new Font("Monospaced", Font.ITALIC, 11));
+        g.setColor(new Color(205, 195, 215));
+        g.drawString(MasterpieceCatalog.getArtist(pName) + "  •  Oil on Belgian Linen", tx, py + 68);
+
+        int estVal = 250000 + (wing * 100000);
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(new Color(245, 215, 120));
+        g.drawString("ESTIMATED BLACK MARKET VALUE: $" + String.format("%,d", estVal), tx, py + 95);
+
+        // Lore description
+        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setColor(new Color(185, 180, 195));
+        g.drawString("Acquired under high-security surveillance in the Classic Gallery.", tx, py + 118);
+        g.drawString("The museum staff remains baffled by the swapped counterfeit.", tx, py + 132);
+
+        // Status ribbon
+        if (isCollected) {
+            g.setColor(new Color(22, 60, 35));
+            g.fillRoundRect(tx, py + 150, pw - 40, 32, 6, 6);
+            g.setColor(new Color(65, 215, 120));
+            g.drawRoundRect(tx, py + 150, pw - 40, 32, 6, 6);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(130, 255, 170));
+            g.drawString("✔ SECURED IN VAULT  |  RECORD: " + time / 60 + ":" + String.format("%02d", time % 60) + " (" + score + " PTS)", tx + 14, py + 170);
+        } else {
+            g.setColor(new Color(50, 28, 30));
+            g.fillRoundRect(tx, py + 150, pw - 40, 32, 6, 6);
+            g.setColor(new Color(220, 80, 80));
+            g.drawRoundRect(tx, py + 150, pw - 40, 32, 6, 6);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(255, 140, 140));
+            g.drawString("🔒 HANGING IN THE MUSEUM  |  INFILTRATE & FORGE TO CLAIM", tx + 14, py + 170);
+        }
+
+        // Inspect Button
+        int bx = tx, by = py + 192, bw = pw - 40, bh = 26;
+        g.setColor(new Color(60, 48, 34));
+        g.fillRoundRect(bx, by, bw, bh, 5, 5);
+        g.setColor(new Color(230, 190, 100));
+        g.drawRoundRect(bx, by, bw, bh, 5, 5);
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(255, 235, 175));
+        drawCentered(g, "🔍 CLICK TO INSPECT MASTERPIECE CANVAS", bx + bw / 2, by + 17);
+    }
+
+    private void drawArtInspectorModal(Graphics2D g, String paintingName) {
+        g.setColor(new Color(6, 8, 14, 235));
+        g.fillRect(0, 0, WIDTH, HEIGHT);
+
+        int mx = 150, my = 35, mw = 660, mh = 530;
+        g.setColor(new Color(22, 20, 28));
+        g.fillRoundRect(mx, my, mw, mh, 12, 12);
+        g.setColor(new Color(215, 175, 90));
+        g.drawRoundRect(mx, my, mw, mh, 12, 12);
+        g.setColor(new Color(80, 60, 30));
+        g.drawRoundRect(mx + 3, my + 3, mw - 6, mh - 6, 10, 10);
+
+        // Header
+        g.setFont(new Font("Monospaced", Font.BOLD, 15));
+        g.setColor(new Color(255, 225, 145));
+        drawCentered(g, "MASTERPIECE DOSSIER: " + paintingName.toUpperCase(), mx + mw / 2, my + 26);
+
+        // Large 2x Canvas (448 x 272)
+        int cx = mx + (mw - 448) / 2;
+        int cy = my + 44;
+
+        // Gold frame
+        g.setColor(new Color(140, 105, 45));
+        g.fillRoundRect(cx - 8, cy - 8, 448 + 16, 272 + 16, 8, 8);
+        g.setColor(new Color(245, 215, 120));
+        g.drawRoundRect(cx - 8, cy - 8, 448 + 16, 272 + 16, 8, 8);
+
+        BufferedImage art = MasterpieceCatalog.getMasterpiece(paintingName);
+        Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g.drawImage(art, cx, cy, 448, 272, null);
+        if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
+
+        // Lower Dossier Info
+        int dy = cy + 272 + 20;
+        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setColor(new Color(255, 225, 155));
+        g.drawString(paintingName, cx, dy + 15);
+
+        g.setFont(new Font("Monospaced", Font.ITALIC, 11));
+        g.setColor(new Color(205, 195, 215));
+        g.drawString(MasterpieceCatalog.getArtist(paintingName) + "  •  Oil on Belgian Linen", cx, dy + 32);
+
+        // Color Palette Swatches
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(230, 195, 120));
+        g.drawString("AUTHENTIC PIGMENTS:", cx, dy + 56);
+
+        Color[] pal = MasterpieceCatalog.getPalette(paintingName);
+        for (int p = 0; p < pal.length; p++) {
+            int sx = cx + 140 + p * 24;
+            g.setColor(pal[p]);
+            g.fillRect(sx, dy + 44, 18, 16);
+            g.setColor(new Color(240, 220, 160));
+            g.drawRect(sx, dy + 44, 18, 16);
+        }
+
+        // Close Button
+        Rectangle closeBtn = galleryInspectCloseBounds();
+        boolean closeHover = hoverX >= 0 && hoverY >= 0 && closeBtn.contains(hoverX, hoverY);
+        g.setColor(closeHover ? new Color(90, 42, 42) : new Color(60, 32, 32));
+        g.fillRoundRect(closeBtn.x, closeBtn.y, closeBtn.width, closeBtn.height, 6, 6);
+        g.setColor(new Color(230, 120, 120));
+        g.drawRoundRect(closeBtn.x, closeBtn.y, closeBtn.width, closeBtn.height, 6, 6);
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setColor(new Color(255, 220, 220));
+        drawCentered(g, "✕ CLOSE INSPECTION (ESC)", closeBtn.x + closeBtn.width / 2, closeBtn.y + 22);
     }
 
     private void drawGallery(Graphics2D g) {
         drawBackdrop(g);
-        g.setFont(new Font("Monospaced", Font.BOLD, 28));
-        g.setColor(new Color(255, 220, 144));
-        drawCentered(g, "STOLEN MASTERPIECES GALLERY", WIDTH / 2, 92);
-        g.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        g.setColor(new Color(215, 207, 215));
-        drawCentered(g, "Complete each museum heist to add its works to your private vault.", WIDTH / 2, 118);
 
-        for (int i = 0; i < MuseumLevel.all().size(); i++) {
-            MuseumLevel level = MuseumLevel.get(i);
-            int y = 142 + i * 68;
+        // Header Title
+        g.setFont(new Font("Monospaced", Font.BOLD, 24));
+        g.setColor(new Color(255, 222, 140));
+        drawCentered(g, "STOLEN MASTERPIECES VAULT", WIDTH / 2, 56);
+
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setColor(new Color(195, 185, 205));
+        drawCentered(g, "Private underground reserve. Click any acquired masterpiece to inspect.", WIDTH / 2, 72);
+
+        // Wing Selection Tabs (5 wings)
+        String[] shortNames = {"1. CLASSIC", "2. GRAND", "3. ROYAL", "4. ANCIENT", "5. NATIONAL"};
+        int totalTabs = MuseumLevel.all().size();
+        for (int i = 0; i < totalTabs; i++) {
+            Rectangle tab = galleryWingTabBounds(i);
+            boolean selected = i == gallerySelectedWing;
+            boolean hovered = hoverX >= 0 && hoverY >= 0 && tab.contains(hoverX, hoverY);
             boolean unlocked = levelManager.isUnlocked(i);
             int bestScore = levelManager.getBestScore(i);
             boolean collected = bestScore > 0;
-            g.setColor(collected ? new Color(46, 43, 44) : new Color(32, 31, 38));
-            g.fillRect(84, y, 792, 58);
-            g.setColor(collected ? GOLD : unlocked ? new Color(115, 96, 74) : new Color(64, 59, 66));
-            g.drawRect(84, y, 792, 58);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 13));
-            g.setColor(collected ? new Color(255, 227, 168) : unlocked ? new Color(210, 202, 214) : new Color(134, 129, 141));
-            g.drawString((i + 1) + ". " + level.getName(), 100, y + 23);
+            g.setColor(selected ? new Color(60, 48, 36) : hovered ? new Color(42, 38, 50) : new Color(26, 24, 32));
+            g.fillRoundRect(tab.x, tab.y, tab.width, tab.height, 6, 6);
+            g.setColor(selected ? GOLD : hovered ? new Color(210, 175, 100) : collected ? new Color(110, 160, 120) : new Color(75, 65, 60));
+            g.drawRoundRect(tab.x, tab.y, tab.width, tab.height, 6, 6);
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
-            g.setColor(collected ? new Color(224, 210, 178) : new Color(148, 143, 156));
-            String paintings = String.join("  |  ", level.getPaintingNames());
-            if (paintings.length() > 74) paintings = paintings.substring(0, 71) + "...";
-            g.drawString(paintings, 100, y + 44);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(selected ? new Color(255, 230, 160) : unlocked ? new Color(215, 205, 220) : new Color(120, 115, 125));
+            String shortName = i < shortNames.length ? shortNames[i] : ((i + 1) + ". WING " + (i + 1));
+            drawCentered(g, shortName, tab.x + tab.width / 2, tab.y + 13);
 
-            int bestTime = levelManager.getBestTime(i);
-            String badge = collected
-                ? "COLLECTED  |  BEST " + bestScore + "  (" + bestTime / 60 + ":" + String.format("%02d", bestTime % 60) + ")"
-                : unlocked ? "UNCLAIMED" : "LOCKED";
-            g.setFont(new Font("Monospaced", Font.BOLD, 11));
-            g.setColor(collected ? new Color(137, 226, 161) : unlocked ? new Color(231, 190, 105) : new Color(134, 129, 141));
-            FontMetrics fm = g.getFontMetrics();
-            g.drawString(badge, 860 - fm.stringWidth(badge), y + 34);
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            if (collected) {
+                g.setColor(new Color(120, 235, 160));
+                drawCentered(g, "★ CLAIMED", tab.x + tab.width / 2, tab.y + 25);
+            } else if (unlocked) {
+                g.setColor(new Color(235, 195, 110));
+                drawCentered(g, "UNCLAIMED", tab.x + tab.width / 2, tab.y + 25);
+            } else {
+                g.setColor(new Color(130, 125, 135));
+                drawCentered(g, "🔒 LOCKED", tab.x + tab.width / 2, tab.y + 25);
+            }
         }
-        drawButton(g, "BACK", 390, 505, false);
+
+        // Active Wing Content
+        MuseumLevel level = MuseumLevel.get(gallerySelectedWing);
+        java.util.List<String> paintings = level.getPaintingNames();
+        int wingBestScore = levelManager.getBestScore(gallerySelectedWing);
+        int wingBestTime = levelManager.getBestTime(gallerySelectedWing);
+        boolean isWingCollected = wingBestScore > 0;
+
+        if (paintings.size() == 1) {
+            // Grand Centerpiece layout for Level 0 (1 painting: Moonlit Orchard)
+            String pName = paintings.get(0);
+            int fx = 120, fy = 126, fw = 350, fh = 240;
+
+            drawPictureFrame(g, fx, fy, fw, fh, pName, isWingCollected);
+
+            int px = 490, py = 126, pw = 350, ph = 240;
+            drawMuseumDossierPlaque(g, px, py, pw, ph, pName, gallerySelectedWing, isWingCollected, wingBestScore, wingBestTime);
+        } else {
+            // 2x2 Grand Exhibition layout for 3 or 4 paintings
+            for (int i = 0; i < 4; i++) {
+                Rectangle card = galleryPaintingBounds(i, paintings.size());
+                boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
+
+                if (i < paintings.size()) {
+                    String pName = paintings.get(i);
+                    g.setColor(hovered ? new Color(38, 34, 46) : new Color(25, 24, 32));
+                    g.fillRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+                    g.setColor(hovered ? GOLD : isWingCollected ? new Color(140, 115, 75) : new Color(75, 65, 60));
+                    g.drawRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+
+                    // Left frame
+                    int fx = card.x + 12, fy = card.y + 12, fw = 176, fh = 138;
+                    drawPictureFrame(g, fx, fy, fw, fh, pName, isWingCollected);
+
+                    // Right plaque info
+                    int tx = card.x + 200;
+                    g.setFont(new Font("Monospaced", Font.BOLD, 12));
+                    g.setColor(new Color(255, 225, 155));
+                    g.drawString(pName, tx, card.y + 26);
+
+                    g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                    g.setColor(new Color(185, 180, 195));
+                    g.drawString(MasterpieceCatalog.getArtist(pName), tx, card.y + 42);
+
+                    int estValue = 180000 + (gallerySelectedWing * 90000) + (i * 35000);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(245, 215, 120));
+                    g.drawString("EST. VALUE: $" + String.format("%,d", estValue), tx, card.y + 64);
+
+                    if (isWingCollected) {
+                        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                        g.setColor(new Color(120, 235, 160));
+                        g.drawString("✔ SECURED IN VAULT", tx, card.y + 84);
+                    } else {
+                        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                        g.setColor(new Color(230, 100, 90));
+                        g.drawString("🔒 TARGET IN MUSEUM", tx, card.y + 84);
+                    }
+
+                    // Inspect Button Pill
+                    int bx = tx, by = card.y + 114, bw = 185, bh = 28;
+                    g.setColor(hovered ? new Color(85, 68, 42) : new Color(55, 45, 32));
+                    g.fillRoundRect(bx, by, bw, bh, 5, 5);
+                    g.setColor(new Color(220, 180, 90));
+                    g.drawRoundRect(bx, by, bw, bh, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(255, 235, 175));
+                    drawCentered(g, "🔍 CLICK TO INSPECT", bx + bw / 2, by + 18);
+                } else {
+                    // Reserve Exhibition slot
+                    g.setColor(new Color(20, 19, 25));
+                    g.fillRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+                    g.setColor(new Color(55, 50, 58));
+                    g.drawRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 11));
+                    g.setColor(new Color(125, 120, 135));
+                    drawCentered(g, "VAULT RESERVE BAY", card.x + card.width / 2, card.y + 70);
+                    g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+                    drawCentered(g, "Additional contraband displays coming soon.", card.x + card.width / 2, card.y + 90);
+                }
+            }
+        }
+
+        drawButton(g, "BACK", 390, 508, false);
+
+        // Art Inspector Modal if active
+        if (galleryInspectedPainting != null) {
+            drawArtInspectorModal(g, galleryInspectedPainting);
+        }
     }
 
     private void drawVictory(Graphics2D g) {
@@ -2248,18 +2892,33 @@ public class GamePanel extends JPanel {
     }
 
     private void drawBackdrop(Graphics2D g) {
-        g.setPaint(new GradientPaint(0, 0, new Color(39, 33, 42), WIDTH, HEIGHT, new Color(9, 11, 17)));
+        g.setPaint(new GradientPaint(0, 0, new Color(28, 24, 34), WIDTH, HEIGHT, new Color(10, 11, 16)));
         g.fillRect(0, 0, WIDTH, HEIGHT);
-        g.setColor(new Color(112, 82, 54));
-        g.fillRect(30, 30, WIDTH - 60, HEIGHT - 60);
-        g.setColor(new Color(25, 24, 31));
-        g.fillRect(36, 36, WIDTH - 72, HEIGHT - 72);
-        g.setColor(new Color(177, 133, 78));
-        g.drawRect(43, 43, WIDTH - 86, HEIGHT - 86);
-        g.setColor(new Color(54, 47, 54));
-        for (int x = 70; x < WIDTH - 80; x += 56) {
-            g.fillRect(x, 58, 4, HEIGHT - 116);
-        }
+
+        g.setColor(new Color(68, 52, 36));
+        g.fillRect(18, 18, WIDTH - 36, HEIGHT - 36);
+
+        g.setColor(new Color(18, 17, 24));
+        g.fillRect(22, 22, WIDTH - 44, HEIGHT - 44);
+
+        g.setColor(new Color(180, 138, 70));
+        g.drawRect(28, 28, WIDTH - 56, HEIGHT - 56);
+        g.setColor(new Color(90, 70, 40));
+        g.drawRect(31, 31, WIDTH - 62, HEIGHT - 62);
+
+        drawCornerRivet(g, 30, 30);
+        drawCornerRivet(g, WIDTH - 30, 30);
+        drawCornerRivet(g, 30, HEIGHT - 30);
+        drawCornerRivet(g, WIDTH - 30, HEIGHT - 30);
+    }
+
+    private void drawCornerRivet(Graphics2D g, int cx, int cy) {
+        g.setColor(new Color(245, 215, 120));
+        g.fillOval(cx - 3, cy - 3, 6, 6);
+        g.setColor(new Color(80, 60, 30));
+        g.drawOval(cx - 3, cy - 3, 6, 6);
+        g.setColor(Color.WHITE);
+        g.fillRect(cx - 1, cy - 1, 2, 2);
     }
 
     private void drawMuseumEmblem(Graphics2D g) {
