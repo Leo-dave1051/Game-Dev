@@ -16,9 +16,11 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.awt.KeyboardFocusManager;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
@@ -37,7 +39,7 @@ import java.util.Set;
 public class GamePanel extends JPanel {
     private static final long serialVersionUID = 1L;
     private enum Screen {
-        MENU, LEVEL_SELECT, SHOP, CUSTOMIZE, SETTINGS, GALLERY, PLAYING, FORGERY, PAUSED, VICTORY, GAME_OVER
+        MENU, LEVEL_SELECT, SHOP, CUSTOMIZE, SETTINGS, GALLERY, PLAYING, FORGERY, PAUSED, VICTORY, GAME_OVER, CURATOR_INSPECTION
     }
 
     static final class Assets {
@@ -286,6 +288,8 @@ public class GamePanel extends JPanel {
                 clickable = buttonBounds(390, PAUSE_BTN_CONTINUE_Y).contains(hoverX, hoverY)
                     || buttonBounds(390, PAUSE_BTN_RESTART_Y).contains(hoverX, hoverY)
                     || buttonBounds(390, PAUSE_BTN_SELECT_Y).contains(hoverX, hoverY);
+            } else if (screen == Screen.CURATOR_INSPECTION) {
+                clickable = buttonBounds(390, 508).contains(hoverX, hoverY);
             } else if (screen == Screen.VICTORY) {
                 clickable = buttonBounds(390, VICTORY_NEXT_Y).contains(hoverX, hoverY)
                     || buttonBounds(390, VICTORY_REPLAY_Y).contains(hoverX, hoverY)
@@ -338,32 +342,18 @@ public class GamePanel extends JPanel {
     }
 
     private void installKeys() {
-        bindMove("W", "up", true);
-        bindMove("UP", "up", true);
-        bindMove("S", "down", true);
-        bindMove("DOWN", "down", true);
-        bindMove("A", "left", true);
-        bindMove("LEFT", "left", true);
-        bindMove("D", "right", true);
-        bindMove("RIGHT", "right", true);
-        bindMove("SHIFT", "sprint", true);
-        bindMove("CONTROL", "sneak", true);
-        bindMove("E", "interact", true);
-        bindMove("F", "steal", true);
-        bindMove("Q", "distract", true);
-        bindMove("W", "up", false);
-        bindMove("UP", "up", false);
-        bindMove("S", "down", false);
-        bindMove("DOWN", "down", false);
-        bindMove("A", "left", false);
-        bindMove("LEFT", "left", false);
-        bindMove("D", "right", false);
-        bindMove("RIGHT", "right", false);
-        bindMove("SHIFT", "sprint", false);
-        bindMove("CONTROL", "sneak", false);
-        bindMove("E", "interact", false);
-        bindMove("F", "steal", false);
-        bindMove("Q", "distract", false);
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(event -> {
+            if (!isShowing()) return false;
+            int id = event.getID();
+            int code = event.getKeyCode();
+            if (id == KeyEvent.KEY_PRESSED) {
+                handleRawKeyPressed(code);
+            } else if (id == KeyEvent.KEY_RELEASED) {
+                handleRawKeyReleased(code);
+            }
+            return false;
+        });
+
         bindAction("P", "pause", () -> togglePause());
         bindAction("ESCAPE", "escape", () -> handleEscape());
         bindAction("F11", "fullScreen", Main::toggleFullScreen);
@@ -380,7 +370,11 @@ public class GamePanel extends JPanel {
             } else if (screen == Screen.LEVEL_SELECT) startSelectedLevel();
             else if (screen == Screen.FORGERY) finishForgery();
             else if (screen == Screen.PAUSED) resumeGame();
-            else if (screen == Screen.VICTORY || screen == Screen.GAME_OVER) startGame(selectedLevel);
+            else if (screen == Screen.CURATOR_INSPECTION) {
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                screen = Screen.VICTORY;
+                updateCursor();
+            } else if (screen == Screen.VICTORY || screen == Screen.GAME_OVER) startGame(selectedLevel);
             repaint();
         });
         bindAction("SPACE", "space", () -> {
@@ -388,6 +382,11 @@ public class GamePanel extends JPanel {
             else if (screen == Screen.LEVEL_SELECT) startSelectedLevel();
             else if (screen == Screen.FORGERY) finishForgery();
             else if (screen == Screen.PAUSED) resumeGame();
+            else if (screen == Screen.CURATOR_INSPECTION) {
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                screen = Screen.VICTORY;
+                updateCursor();
+            }
             repaint();
         });
         bindAction("Z", "undo", () -> {
@@ -412,6 +411,59 @@ public class GamePanel extends JPanel {
                 startGame(selectedLevel);
             }
         });
+    }
+
+    private void handleRawKeyPressed(int code) {
+        if (code == KeyEvent.VK_W || code == KeyEvent.VK_UP) {
+            if (screen == Screen.LEVEL_SELECT) moveLevelSelection(levelSelectionDelta("up"));
+            pressedKeys.add("up");
+        } else if (code == KeyEvent.VK_S || code == KeyEvent.VK_DOWN) {
+            if (screen == Screen.LEVEL_SELECT) moveLevelSelection(levelSelectionDelta("down"));
+            pressedKeys.add("down");
+        } else if (code == KeyEvent.VK_A || code == KeyEvent.VK_LEFT) {
+            if (screen == Screen.LEVEL_SELECT) moveLevelSelection(levelSelectionDelta("left"));
+            pressedKeys.add("left");
+        } else if (code == KeyEvent.VK_D || code == KeyEvent.VK_RIGHT) {
+            if (screen == Screen.LEVEL_SELECT) moveLevelSelection(levelSelectionDelta("right"));
+            pressedKeys.add("right");
+        } else if (code == KeyEvent.VK_SHIFT) {
+            pressedKeys.add("sprint");
+        } else if (code == KeyEvent.VK_R) {
+            if (screen == Screen.PLAYING) {
+                pressedKeys.add("sprint");
+            }
+        } else if (code == KeyEvent.VK_CONTROL || code == KeyEvent.VK_C) {
+            pressedKeys.add("sneak");
+        } else if (code == KeyEvent.VK_E) {
+            if (!pressedKeys.contains("interact")) worldInputEdge("interact");
+            pressedKeys.add("interact");
+        } else if (code == KeyEvent.VK_F) {
+            if (!pressedKeys.contains("steal")) worldInputEdge("steal");
+            pressedKeys.add("steal");
+        } else if (code == KeyEvent.VK_Q) {
+            if (!pressedKeys.contains("distract")) worldInputEdge("distract");
+            pressedKeys.add("distract");
+        } else if (code == KeyEvent.VK_ENTER || code == KeyEvent.VK_SPACE) {
+            if (screen == Screen.CURATOR_INSPECTION) {
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                screen = Screen.VICTORY;
+                updateCursor();
+                repaint();
+            }
+        }
+    }
+
+    private void handleRawKeyReleased(int code) {
+        if (code == KeyEvent.VK_W || code == KeyEvent.VK_UP) pressedKeys.remove("up");
+        else if (code == KeyEvent.VK_S || code == KeyEvent.VK_DOWN) pressedKeys.remove("down");
+        else if (code == KeyEvent.VK_A || code == KeyEvent.VK_LEFT) pressedKeys.remove("left");
+        else if (code == KeyEvent.VK_D || code == KeyEvent.VK_RIGHT) pressedKeys.remove("right");
+        else if (code == KeyEvent.VK_SHIFT) pressedKeys.remove("sprint");
+        else if (code == KeyEvent.VK_R) { if (screen == Screen.PLAYING) pressedKeys.remove("sprint"); }
+        else if (code == KeyEvent.VK_CONTROL || code == KeyEvent.VK_C) pressedKeys.remove("sneak");
+        else if (code == KeyEvent.VK_E) pressedKeys.remove("interact");
+        else if (code == KeyEvent.VK_F) pressedKeys.remove("steal");
+        else if (code == KeyEvent.VK_Q) pressedKeys.remove("distract");
     }
 
     private void bindMove(String key, String control, boolean down) {
@@ -531,7 +583,7 @@ public class GamePanel extends JPanel {
             screen = Screen.MENU;
             updateCursor();
             repaint();
-        } else if (screen == Screen.PAUSED || screen == Screen.VICTORY || screen == Screen.GAME_OVER) {
+        } else if (screen == Screen.PAUSED || screen == Screen.VICTORY || screen == Screen.GAME_OVER || screen == Screen.CURATOR_INSPECTION) {
             gameLoop.stop();
             pressedKeys.clear();
             screen = Screen.LEVEL_SELECT;
@@ -657,6 +709,13 @@ public class GamePanel extends JPanel {
             if (buttonBounds(390, PAUSE_BTN_CONTINUE_Y).contains(x, y)) resumeGame();
             else if (buttonBounds(390, PAUSE_BTN_RESTART_Y).contains(x, y)) startGame();
             else if (buttonBounds(390, PAUSE_BTN_SELECT_Y).contains(x, y)) handleEscape();
+        } else if (screen == Screen.CURATOR_INSPECTION) {
+            if (buttonBounds(390, 508).contains(x, y)) {
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                screen = Screen.VICTORY;
+                updateCursor();
+                repaint();
+            }
         } else if (screen == Screen.VICTORY) {
             if (buttonBounds(390, VICTORY_NEXT_Y).contains(x, y)) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
@@ -747,7 +806,7 @@ public class GamePanel extends JPanel {
         world.update(dt, input);
         if (world.isWon()) {
             lastResult = levelManager.recordCompletion(world);
-            screen = Screen.VICTORY;
+            screen = Screen.CURATOR_INSPECTION;
             gameLoop.stop();
             pressedKeys.clear();
             updateCursor();
@@ -781,6 +840,7 @@ public class GamePanel extends JPanel {
             if (world != null) drawGame(g, world);
             if (screen == Screen.FORGERY) drawForgeryStudio(g);
             else if (screen == Screen.PAUSED) drawOverlay(g, "HEIST PAUSED", "The guards are still on their rounds.", "CONTINUE", "RESTART HEIST", "LEVEL SELECT");
+            else if (screen == Screen.CURATOR_INSPECTION) drawCuratorInspection(g);
             else if (screen == Screen.VICTORY) drawVictory(g);
             else if (screen == Screen.GAME_OVER) drawOverlay(g, "HEIST BUSTED", world == null ? "" : world.getEndReason(), "TRY AGAIN", "", "LEVEL SELECT");
         }
@@ -1036,6 +1096,72 @@ public class GamePanel extends JPanel {
             g.setFont(new Font("Monospaced", Font.BOLD, 14));
             g.setColor(chasing ? new Color(255, 87, 76) : GOLD);
             g.drawString(chasing ? "!" : "?", x + 7, y + Guard.HEIGHT - GUARD_SPRITE_HEIGHT - 3);
+        }
+
+        // --- Live Art Inspection Badge & Suspense Progress Bar ---
+        int headY = y + Guard.HEIGHT - GUARD_SPRITE_HEIGHT;
+        if (guard.isInspectingArt()) {
+            int bw = 72;
+            int bh = 14;
+            boolean showBelow = (headY - 26 < 88);
+            int bx = (int) guard.centerX() - bw / 2;
+            bx = Math.max(8, Math.min(getWidth() - bw - 8, bx));
+            int by = showBelow ? ((int) (guard.getY() + Guard.HEIGHT) + 6) : (headY - 24);
+
+            g.setColor(new Color(18, 16, 24, 230));
+            g.fillRoundRect(bx, by, bw, bh, 4, 4);
+            g.setColor(new Color(245, 215, 120));
+            g.drawRoundRect(bx, by, bw, bh, 4, 4);
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 8));
+            g.setColor(new Color(255, 230, 160));
+            drawCentered(g, "🔍 INSPECTING", bx + bw / 2, by + 10);
+
+            // Progress bar below badge
+            int barY = by + 16;
+            int barW = 60;
+            int barH = 4;
+            int barX = (int) guard.centerX() - barW / 2;
+            barX = Math.max(8, Math.min(getWidth() - barW - 8, barX));
+            g.setColor(new Color(30, 26, 38));
+            g.fillRect(barX, barY, barW, barH);
+            g.setColor(new Color(255, 215, 0));
+            int fillW = (int) (barW * guard.getInspectProgress());
+            g.fillRect(barX, barY, fillW, barH);
+            g.setColor(new Color(140, 110, 50));
+            g.drawRect(barX, barY, barW, barH);
+        } else if (guard.getSpeechBubbleText() != null) {
+            String speech = guard.getSpeechBubbleText();
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            int sw = g.getFontMetrics().stringWidth(speech);
+            int bw = sw + 16;
+            int bh = 18;
+            boolean showBelow = (headY - 24 < 88);
+            int bx = (int) guard.centerX() - bw / 2;
+            bx = Math.max(8, Math.min(getWidth() - bw - 8, bx));
+            int by = showBelow ? ((int) (guard.getY() + Guard.HEIGHT) + 6) : (headY - 24);
+
+            g.setColor(new Color(16, 14, 22, 235));
+            g.fillRoundRect(bx, by, bw, bh, 5, 5);
+            g.setColor(guard.getSpeechBubbleColor());
+            g.drawRoundRect(bx, by, bw, bh, 5, 5);
+
+            // Pointer triangle pointing to guard
+            int cx = Math.max(bx + 6, Math.min(bx + bw - 6, (int) guard.centerX()));
+            g.setColor(new Color(16, 14, 22, 235));
+            if (showBelow) {
+                g.fillPolygon(new int[]{cx - 3, cx + 3, cx}, new int[]{by, by, by - 4}, 3);
+                g.setColor(guard.getSpeechBubbleColor());
+                g.drawLine(cx - 3, by, cx, by - 4);
+                g.drawLine(cx + 3, by, cx, by - 4);
+            } else {
+                g.fillPolygon(new int[]{cx - 3, cx + 3, cx}, new int[]{by + bh, by + bh, by + bh + 4}, 3);
+                g.setColor(guard.getSpeechBubbleColor());
+                g.drawLine(cx - 3, by + bh, cx, by + bh + 4);
+                g.drawLine(cx + 3, by + bh, cx, by + bh + 4);
+            }
+
+            drawCentered(g, speech, bx + bw / 2, by + 12);
         }
     }
 
@@ -2353,11 +2479,11 @@ public class GamePanel extends JPanel {
         // Cheatsheet items
         String[][] controls = {
             {"[WASD / ARROWS]", "Move Operative"},
-            {"[SHIFT]", "Sneak (Silent Footsteps)"},
-            {"[R]", "Sprint (Fast, Loud)"},
+            {"[SHIFT / R]", "Sprint (Fast, Loud)"},
+            {"[CTRL / C]", "Sneak (Silent Footsteps)"},
             {"[E]", "Forge, Swap & Hide"},
             {"[Q]", "Throw Distraction Coin"},
-            {"[P]", "Pause Heist"},
+            {"[P / ESC]", "Pause / Back"},
             {"[M]", "Mute Sound"},
             {"[F11]", "Toggle Fullscreen"}
         };
@@ -2746,6 +2872,205 @@ public class GamePanel extends JPanel {
         if (galleryInspectedPainting != null) {
             drawArtInspectorModal(g, galleryInspectedPainting);
         }
+    }
+
+    private void drawCuratorInspection(Graphics2D g) {
+        drawBackdrop(g);
+
+        // Header Title
+        g.setFont(new Font("Monospaced", Font.BOLD, 24));
+        g.setColor(new Color(255, 222, 140));
+        drawCentered(g, "CURATOR'S AUTHENTICATION LAB", WIDTH / 2, 54);
+
+        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setColor(new Color(195, 185, 205));
+        drawCentered(g, "Interpol Art Division & Museum Curators examining recovered exhibits...", WIDTH / 2, 70);
+
+        MuseumMap.Painting stolen = null;
+        if (world != null && world.getMap() != null) {
+            for (MuseumMap.Painting p : world.getMap().getPaintings()) {
+                if (p.isStolen()) {
+                    stolen = p;
+                    break;
+                }
+            }
+        }
+
+        String pName = stolen != null ? stolen.getName() : "Moonlit Orchard";
+        int quality = stolen != null ? stolen.getQuality() : 85;
+        String artist = MasterpieceCatalog.getArtist(pName);
+        BufferedImage originalArt = MasterpieceCatalog.getMasterpiece(pName);
+        BufferedImage fakeArt = stolen != null && stolen.getFakeImage() != null ? stolen.getFakeImage() : originalArt;
+
+        // --- LEFT FRAME: AUTHENTIC ORIGINAL ---
+        int lx = 70, ly = 88, lw = 396, lh = 228;
+        drawPictureFrame(g, lx, ly, lw, lh, pName, true);
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(255, 220, 130));
+        drawCentered(g, "🏛 ORIGINAL: " + pName.toUpperCase(), lx + lw / 2, ly + 20);
+
+        // --- RIGHT FRAME: OPERATIVE'S RECREATED FORGERY ---
+        int rx = 494, ry = 88, rw = 396, rh = 228;
+        g.setColor(new Color(135, 100, 45));
+        g.fillRoundRect(rx, ry, rw, rh, 6, 6);
+        g.setColor(new Color(235, 195, 105));
+        g.drawRoundRect(rx, ry, rw, rh, 6, 6);
+        g.setColor(new Color(75, 50, 20));
+        g.drawRoundRect(rx + 2, ry + 2, rw - 4, rh - 4, 4, 4);
+        drawCornerRivet(g, rx + 5, ry + 5);
+        drawCornerRivet(g, rx + rw - 5, ry + 5);
+        drawCornerRivet(g, rx + 5, ry + rh - 5);
+        drawCornerRivet(g, rx + rw - 5, ry + rh - 5);
+
+        int rcx = rx + 8, rcy = ry + 26, rcw = rw - 16, rch = rh - 34;
+        g.setColor(new Color(12, 11, 15));
+        g.fillRect(rcx, rcy, rcw, rch);
+        if (fakeArt != null) {
+            Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g.drawImage(fakeArt, rcx, rcy, rcw, rch, null);
+            if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
+        }
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(130, 240, 175));
+        drawCentered(g, "🖌 OPERATIVE'S FORGERY (" + quality + "% MATCH)", rx + rw / 2, ry + 20);
+
+        // Animated Magnifying Loupe Scanner on Forgery Canvas
+        double sweep = (Math.sin(animationFrame * 0.05) + 1.0) / 2.0;
+        int loupeX = rcx + 28 + (int) (sweep * (rcw - 56));
+        int loupeY = rcy + rch / 2 + (int) (Math.sin(animationFrame * 0.08) * 22);
+
+        g.setColor(new Color(255, 255, 255, 35));
+        g.fillOval(loupeX - 22, loupeY - 22, 44, 44);
+        g.setColor(new Color(255, 215, 100, 210));
+        g.setStroke(new BasicStroke(2.0f));
+        g.drawOval(loupeX - 22, loupeY - 22, 44, 44);
+        g.setStroke(new BasicStroke(1.0f));
+
+        g.setColor(new Color(255, 230, 140, 170));
+        g.drawLine(loupeX - 10, loupeY, loupeX + 10, loupeY);
+        g.drawLine(loupeX, loupeY - 10, loupeX, loupeY + 10);
+
+        g.setColor(new Color(205, 160, 75));
+        g.setStroke(new BasicStroke(3.0f));
+        g.drawLine(loupeX + 16, loupeY + 16, loupeX + 30, loupeY + 30);
+        g.setStroke(new BasicStroke(1.0f));
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setColor(new Color(255, 235, 170));
+        drawCentered(g, "🔍 ANALYZING PIGMENT", loupeX, Math.max(ry + 32, loupeY - 26));
+
+        // --- CENTER ASSESSMENT DOSSIER ---
+        int cx = 70, cy = 328, cw = 820, ch = 162;
+        g.setColor(new Color(25, 23, 33, 240));
+        g.fillRoundRect(cx, cy, cw, ch, 8, 8);
+        g.setColor(new Color(180, 140, 75));
+        g.drawRoundRect(cx, cy, cw, ch, 8, 8);
+        g.setColor(new Color(75, 55, 30));
+        g.drawRoundRect(cx + 2, cy + 2, cw - 4, ch - 4, 6, 6);
+
+        // Panel 1: Accuracy Gauge (Left, w = 220)
+        int p1x = cx + 18, p1y = cy + 16;
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(210, 175, 100));
+        drawCentered(g, "REPLICATION ACCURACY", p1x + 100, p1y + 14);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 36));
+        Color accColor = quality >= 80 ? new Color(110, 235, 150)
+            : quality >= 60 ? new Color(245, 205, 90) : new Color(240, 90, 80);
+        g.setColor(accColor);
+        drawCentered(g, quality + "%", p1x + 100, p1y + 54);
+
+        // Accuracy status pill
+        int pillW = 180, pillH = 22;
+        int pillX = p1x + 10;
+        int pillY = p1y + 68;
+        g.setColor(quality >= 80 ? new Color(22, 60, 35) : quality >= 60 ? new Color(60, 48, 22) : new Color(60, 24, 24));
+        g.fillRoundRect(pillX, pillY, pillW, pillH, 5, 5);
+        g.setColor(accColor);
+        g.drawRoundRect(pillX, pillY, pillW, pillH, 5, 5);
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        String statusPill = quality >= 80 ? "★ FLAWLESS MASTERWORK" : quality >= 60 ? "PASSABLE COUNTERFEIT" : "FLAWED COUNTERFEIT";
+        drawCentered(g, statusPill, pillX + pillW / 2, pillY + 15);
+
+        // Mini progress bar below pill
+        g.setColor(new Color(18, 16, 24));
+        g.fillRect(pillX, pillY + 28, pillW, 6);
+        g.setColor(accColor);
+        g.fillRect(pillX, pillY + 28, (int) (pillW * (quality / 100.0)), 6);
+        g.setColor(new Color(80, 65, 45));
+        g.drawRect(pillX, pillY + 28, pillW, 6);
+
+        // Panel 2: Curator's Verdict (Center, w = 360)
+        int p2x = cx + 240, p2y = cy + 16;
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(210, 175, 100));
+        g.drawString("CURATOR'S LAB EVALUATION", p2x, p2y + 14);
+
+        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setColor(new Color(215, 205, 220));
+        if (quality >= 80) {
+            g.drawString("Chief Curator: 'The pigment blend and stroke fidelity are", p2x, p2y + 36);
+            g.drawString("indistinguishable from the 19th century master.'", p2x, p2y + 50);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(110, 235, 150));
+            g.drawString("✔ FOOLED MUSEUM STAFF  —  UNDETECTED ON EXHIBIT", p2x, p2y + 72);
+            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+            g.setColor(new Color(175, 170, 185));
+            g.drawString("Security reported zero anomalies during shift change.", p2x, p2y + 92);
+        } else if (quality >= 60) {
+            g.drawString("Chief Curator: 'The canvas appears authentic at glance,", p2x, p2y + 36);
+            g.drawString("though subtle color variations arouse minor suspicion.'", p2x, p2y + 50);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(245, 205, 90));
+            g.drawString("⚠️ ACCEPTED WITH INVESTIGATION  —  SECURITY ON ALERT", p2x, p2y + 72);
+            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+            g.setColor(new Color(175, 170, 185));
+            g.drawString("Forensic audit scheduled in 48 hours. Operative safe.", p2x, p2y + 92);
+        } else {
+            g.drawString("Chief Curator: 'A grotesque forgery! The linseed oil is", p2x, p2y + 36);
+            g.drawString("still tacky and the brush strokes are completely off!'", p2x, p2y + 50);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(new Color(240, 90, 80));
+            g.drawString("🚨 FORGERY EXPOSED  —  MUSEUM ALARMS BLARING", p2x, p2y + 72);
+            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+            g.setColor(new Color(175, 170, 185));
+            g.drawString("Interpol was alerted immediately. Cut reduced for damage control.", p2x, p2y + 92);
+        }
+
+        // Panel 3: Black Market Bounty (Right, w = 190)
+        int p3x = cx + 620, p3y = cy + 16;
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(210, 175, 100));
+        g.drawString("BLACK MARKET FENCE", p3x, p3y + 14);
+
+        int estVal = 250000 + (selectedLevel * 100000);
+        int payout = (int) (estVal * (quality / 100.0));
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(new Color(255, 225, 155));
+        g.drawString("VALUATION: $" + String.format("%,d", estVal), p3x, p3y + 36);
+        g.setColor(new Color(110, 235, 150));
+        g.drawString("FENCE CUT: $" + String.format("%,d", payout), p3x, p3y + 54);
+
+        int rewardCredits = lastResult != null ? lastResult.getReward()
+            : (quality >= 80 ? 4 : quality >= 60 ? 2 : 1);
+        g.setColor(new Color(255, 215, 0));
+        g.drawString("CREDITS:   +" + rewardCredits + " CR", p3x, p3y + 72);
+
+        // Wax seal badge
+        int sealW = 160, sealH = 26;
+        int sealX = p3x, sealY = p3y + 88;
+        g.setColor(quality >= 80 ? new Color(20, 55, 30) : quality >= 60 ? new Color(55, 42, 18) : new Color(55, 20, 20));
+        g.fillRoundRect(sealX, sealY, sealW, sealH, 6, 6);
+        g.setColor(accColor);
+        g.drawRoundRect(sealX, sealY, sealW, sealH, 6, 6);
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        drawCentered(g, quality >= 80 ? "✔ AUTHENTICATED" : quality >= 60 ? "⚠️ CAUTION" : "✖ REJECTED",
+            sealX + sealW / 2, sealY + 17);
+
+        // Bottom Continue Button
+        drawButton(g, "READ CHRONICLE ➔", 390, 508, false);
     }
 
     private void drawVictory(Graphics2D g) {

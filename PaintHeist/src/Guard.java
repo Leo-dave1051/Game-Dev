@@ -1,9 +1,10 @@
+import java.awt.Color;
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class Guard {
-    public enum State { PATROL, INSPECT, ALERT, CHASE, SEARCH, RETURN }
+    public enum State { PATROL, INSPECT, ALERT, CHASE, SEARCH, RETURN, INSPECTING_ART }
 
     public static final int WIDTH = 24;
     public static final int HEIGHT = 24;
@@ -33,6 +34,12 @@ public final class Guard {
     private List<Point> path = new ArrayList<>();
     private boolean playerVisible;
 
+    private MuseumMap.Painting inspectingPainting;
+    private double artInspectTimer;
+    private String speechBubbleText;
+    private Color speechBubbleColor = Color.WHITE;
+    private double speechBubbleTimer;
+
     public Guard(String name, double x, double y, int speed, Point... route) {
         this.name = name;
         this.x = x;
@@ -59,6 +66,9 @@ public final class Guard {
             && map.hasLineOfSight(centerX(), centerY(), playerCenterX, playerCenterY);
 
         if (playerVisible) {
+            if (state == State.INSPECTING_ART) {
+                inspectingPainting = null;
+            }
             state = State.CHASE;
             lostSightTimer = 0;
             goalX = playerX;
@@ -77,7 +87,12 @@ public final class Guard {
             }
         }
 
+        if (speechBubbleTimer > 0) {
+            speechBubbleTimer = Math.max(0, speechBubbleTimer - dt);
+        }
+
         if (!playerVisible && hasNoise && state != State.CHASE && state != State.SEARCH
+            && state != State.INSPECTING_ART
             && Point.distance(centerX(), centerY(), noiseX, noiseY) <= noiseRadius) {
             goalX = noiseX - WIDTH / 2.0;
             goalY = noiseY - HEIGHT / 2.0;
@@ -88,6 +103,21 @@ public final class Guard {
         switch (state) {
             case PATROL:
                 updatePatrol(dt, map);
+                break;
+            case INSPECTING_ART:
+                moving = false;
+                artInspectTimer += dt;
+                if (inspectingPainting != null) {
+                    double targetCenterX = inspectingPainting.getX() + MuseumMap.Painting.WIDTH / 2.0;
+                    double targetCenterY = inspectingPainting.getY() + MuseumMap.Painting.HEIGHT / 2.0;
+                    double dx = targetCenterX - centerX();
+                    double dy = targetCenterY - centerY();
+                    double dist = Math.hypot(dx, dy);
+                    if (dist > 0.001) {
+                        facingX = dx / dist;
+                        facingY = dy / dist;
+                    }
+                }
                 break;
             case ALERT:
                 stateTimer += dt;
@@ -254,4 +284,64 @@ public final class Guard {
     public boolean isPlayerVisible() { return playerVisible; }
     public boolean isMoving() { return moving; }
     public Point getFacing() { return new Point((int) Math.round(facingX * 100), (int) Math.round(facingY * 100)); }
+
+    public void startInspectingArt(MuseumMap.Painting painting) {
+        this.inspectingPainting = painting;
+        this.state = State.INSPECTING_ART;
+        this.artInspectTimer = 0;
+        this.moving = false;
+        this.path.clear();
+        double targetCenterX = painting.getX() + MuseumMap.Painting.WIDTH / 2.0;
+        double targetCenterY = painting.getY() + MuseumMap.Painting.HEIGHT / 2.0;
+        double dx = targetCenterX - centerX();
+        double dy = targetCenterY - centerY();
+        double dist = Math.hypot(dx, dy);
+        if (dist > 0.001) {
+            facingX = dx / dist;
+            facingY = dy / dist;
+        }
+    }
+
+    public boolean isInspectingArt() {
+        return state == State.INSPECTING_ART;
+    }
+
+    public double getInspectProgress() {
+        return Math.min(1.0, artInspectTimer / 2.0);
+    }
+
+    public double getArtInspectTimer() {
+        return artInspectTimer;
+    }
+
+    public MuseumMap.Painting getInspectingPainting() {
+        return inspectingPainting;
+    }
+
+    public void finishArtInspection(boolean continuePatrol) {
+        inspectingPainting = null;
+        artInspectTimer = 0;
+        if (continuePatrol) {
+            state = State.RETURN;
+            stateTimer = 0;
+        }
+    }
+
+    public void setSpeechBubble(String text, Color color, double duration) {
+        this.speechBubbleText = text;
+        this.speechBubbleColor = color;
+        this.speechBubbleTimer = duration;
+    }
+
+    public String getSpeechBubbleText() {
+        return speechBubbleTimer > 0 ? speechBubbleText : null;
+    }
+
+    public Color getSpeechBubbleColor() {
+        return speechBubbleColor;
+    }
+
+    public double getSpeechBubbleTimer() {
+        return speechBubbleTimer;
+    }
 }

@@ -398,36 +398,52 @@ public final class GameWorld {
         for (MuseumMap.Painting painting : map.getPaintings()) {
             if (!painting.isStolen() || painting.isDiscovered()) continue;
             for (Guard guard : guards) {
-                double distance = Point.distance(guard.centerX(), guard.centerY(),
-                    painting.getX() + MuseumMap.Painting.WIDTH / 2.0,
-                    painting.getY() + MuseumMap.Painting.HEIGHT / 2.0);
-                if (distance < 78 && map.hasLineOfSight(guard.centerX(), guard.centerY(),
-                    painting.getX() + MuseumMap.Painting.WIDTH / 2.0,
-                    painting.getY() + MuseumMap.Painting.HEIGHT / 2.0)) {
-
-                    painting.nearbyGuardTime += dt;
-                    if (painting.nearbyGuardTime >= 1.5 && !painting.guardInspected) {
+                if (guard.isInspectingArt() && guard.getInspectingPainting() == painting) {
+                    if (guard.getInspectProgress() >= 1.0) {
                         painting.guardInspected = true;
                         if (painting.getQuality() >= 80) {
                             painting.guardAdmired = true;
-                            suspicion = Math.max(0, suspicion - 6);
-                            showMessage("Guard inspected '" + painting.getName() + "': 'A magnificent work!' (FOOLED!)", 3.2);
+                            guard.setSpeechBubble("★ Magnificent! A true masterwork!", new java.awt.Color(70, 240, 130), 3.5);
+                            guard.finishArtInspection(true);
+                            suspicion = Math.max(0, suspicion - 8);
+                            SoundEffects.play(SoundEffects.Cue.CLICK);
+                            showMessage("Guard inspected '" + painting.getName() + "': Fooled by master forgery! Suspicion dropped.", 3.5);
                         } else if (painting.getQuality() >= 60) {
                             painting.guardSuspected = true;
+                            guard.setSpeechBubble("❓ Hmm... something looks odd here...", new java.awt.Color(255, 215, 80), 3.5);
+                            guard.finishArtInspection(false);
+                            guard.setSearchTarget(guard.getX(), guard.getY());
                             suspicion = Math.min(100, suspicion + 14);
-                            showMessage("Guard inspected '" + painting.getName() + "': 'Wait... something looks odd here...'", 3.0);
+                            SoundEffects.play(SoundEffects.Cue.ALERT);
+                            showMessage("Guard inspected '" + painting.getName() + "': Suspicious brushwork! Guard investigating area.", 3.5);
                         } else {
                             painting.guardAlarmed = true;
                             painting.discovered = true;
-                            suspicion = Math.min(100, suspicion + 40);
+                            guard.setSpeechBubble("🚨 COUNTERFEIT! THIS IS A FAKE!!", new java.awt.Color(255, 80, 80), 4.0);
+                            guard.finishArtInspection(false);
+                            suspicion = Math.min(100, suspicion + 45);
                             alertNearestGuardToFake(painting);
                             guard.setSearchTarget(playerX, playerY);
                             makeNoiseAt(painting.getX(), painting.getY(), 420, 1.0, "fake alarm");
                             SoundEffects.play(SoundEffects.Cue.ALERT);
-                            showMessage("ALARM! A guard detected the fake '" + painting.getName() + "' (" + painting.getQuality() + "%)! RUN!", 3.8);
+                            showMessage("ALARM! Guard discovered counterfeit '" + painting.getName() + "' (" + painting.getQuality() + "%)! RUN!", 4.0);
                         }
                     }
                     break;
+                }
+
+                if (!painting.guardInspected && (guard.getState() == Guard.State.PATROL || guard.getState() == Guard.State.RETURN)) {
+                    double distance = Point.distance(guard.centerX(), guard.centerY(),
+                        painting.getX() + MuseumMap.Painting.WIDTH / 2.0,
+                        painting.getY() + MuseumMap.Painting.HEIGHT / 2.0);
+                    if (distance < 82 && map.hasLineOfSight(guard.centerX(), guard.centerY(),
+                        painting.getX() + MuseumMap.Painting.WIDTH / 2.0,
+                        painting.getY() + MuseumMap.Painting.HEIGHT / 2.0)) {
+                        guard.startInspectingArt(painting);
+                        SoundEffects.play(SoundEffects.Cue.CLICK);
+                        showMessage("Guard stopped to examine '" + painting.getName() + "'...", 2.0);
+                        break;
+                    }
                 }
             }
             if (painting.getQuality() < 60 && !painting.isDiscovered()) {
