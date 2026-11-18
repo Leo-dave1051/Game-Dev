@@ -85,11 +85,10 @@ public final class Guard {
         double playerCenterY = playerY + 12;
         double distance = Point.distance(centerX(), centerY(), playerCenterX, playerCenterY);
 
-        double baseVisionRadius = guardType == GuardType.ELITE ? 240 : 195;
-        double visionMaxDist = state == State.CHASE ? (baseVisionRadius + 35) : (sprinting ? baseVisionRadius * 1.28 : baseVisionRadius);
+        double visionMaxDist = getVisionRadius();
 
         playerVisible = !hidden && distance <= visionMaxDist
-            && (distance < 36 || inVisionCone(playerCenterX, playerCenterY))
+            && (distance < 16 || inVisionCone(playerCenterX, playerCenterY))
             && map.hasLineOfSight(centerX(), centerY(), playerCenterX, playerCenterY);
 
         if (speechBubbleTimer > 0) {
@@ -300,7 +299,7 @@ public final class Guard {
         double magnitude = Math.hypot(dx, dy);
         if (magnitude < 0.001) return true;
         double dot = (dx * facingX + dy * facingY) / magnitude;
-        return dot >= Math.cos(Math.toRadians(58));
+        return dot >= Math.cos(Math.toRadians(getVisionAngleDegrees()));
     }
 
     private void updatePatrol(double dt, MuseumMap map) {
@@ -482,12 +481,25 @@ public final class Guard {
     }
 
     public double getVisionRadius() {
-        double base = guardType == GuardType.ELITE ? 240.0 : 195.0;
-        return state == State.CHASE ? (base + 35.0) : base;
+        double base;
+        switch (guardType) {
+            case ELITE: base = 155.0; break;
+            case SUPERVISOR: base = 142.0; break;
+            case CURATOR: base = 128.0; break;
+            case REGULAR:
+            default: base = 135.0; break;
+        }
+        return state == State.CHASE ? (base + 20.0) : base;
     }
 
     public double getVisionAngleDegrees() {
-        return guardType == GuardType.ELITE ? 64.0 : 58.0;
+        switch (guardType) {
+            case ELITE: return 40.0;
+            case SUPERVISOR: return 36.0;
+            case CURATOR: return 30.0;
+            case REGULAR:
+            default: return 35.0;
+        }
     }
 
     public double getFacingAngle() {
