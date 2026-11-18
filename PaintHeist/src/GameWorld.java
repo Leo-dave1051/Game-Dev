@@ -281,16 +281,11 @@ public final class GameWorld {
         LaserBarrier activeLaser = map.getActiveLaserContact(playerBounds());
         if (activeLaser != null) triggerLaserAlarm(activeLaser);
         if (anyGuardChasing || cameraDetecting) {
-            suspicion = Math.min(100, suspicion + dt * (sprinting ? 34 : 26));
-            if (suspicion >= 100) {
-                gameOver = true;
-                endReason = "Security identified you and sealed the museum.";
-                SoundEffects.play(SoundEffects.Cue.BUSTED);
-            }
+            suspicion = Math.min(100, suspicion + dt * (sprinting ? 20 : 14));
         } else if (anyGuardInvestigating || visibleGuards > 0) {
-            suspicion = Math.min(100, suspicion + dt * 10);
+            suspicion = Math.min(100, suspicion + dt * 8);
         } else {
-            suspicion = Math.max(0, suspicion - dt * 5.5);
+            suspicion = Math.max(0, suspicion - dt * 7);
         }
         if (hidingIn == null && getStolenCount() == map.getPaintingCount() && isAtAnyExit()) {
             won = true;
