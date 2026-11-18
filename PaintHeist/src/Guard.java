@@ -6,17 +6,35 @@ import java.util.List;
 public final class Guard {
     public enum State { PATROL, INSPECT, ALERT, CHASE, SEARCH, RETURN, INSPECTING_ART }
 
+    public enum DetectionStage {
+        UNAWARE,        // 0% - 24%: Calm routine patrol
+        SUSPICIOUS,     // 25% - 64%: Pauses, turns toward disturbance, yellow "?"
+        INVESTIGATING,  // 65% - 94%: Walks to investigate suspicious spot, orange "?"
+        ALERT,          // 95% - 99%: Intently identifying intruder, bright red "!"
+        CHASE           // 100%: Confirmed intruder! Full sprint chase
+    }
+
+    public enum GuardType {
+        REGULAR,
+        ELITE,
+        SUPERVISOR,
+        CURATOR
+    }
+
     public static final int WIDTH = 24;
     public static final int HEIGHT = 24;
     private final List<Point> patrolRoute;
     private final int patrolSpeed;
     private final String name;
+    private final GuardType guardType;
     private double x;
     private double y;
     private double facingX = 1;
     private double facingY;
     private int patrolIndex;
     private State state = State.PATROL;
+    private DetectionStage detectionStage = DetectionStage.UNAWARE;
+    private double suspicion; // 0.0 to 100.0
     private double stateTimer;
     private double lostSightTimer;
     private double replanTimer;
@@ -41,11 +59,16 @@ public final class Guard {
     private double speechBubbleTimer;
 
     public Guard(String name, double x, double y, int speed, Point... route) {
+        this(name, GuardType.REGULAR, x, y, speed, route);
+    }
+
+    public Guard(String name, GuardType guardType, double x, double y, int speed, Point... route) {
         this.name = name;
+        this.guardType = guardType != null ? guardType : GuardType.REGULAR;
         this.x = x;
         this.y = y;
-        patrolSpeed = speed;
-        patrolRoute = new ArrayList<>();
+        this.patrolSpeed = speed;
+        this.patrolRoute = new ArrayList<>();
         for (Point point : route) patrolRoute.add(new Point(point));
         if (!patrolRoute.isEmpty()) {
             goalX = patrolRoute.get(0).x;
@@ -54,55 +77,137 @@ public final class Guard {
     }
 
     public void update(double dt, MuseumMap map, double playerX, double playerY, boolean hidden,
-                       boolean sprinting, boolean hasNoise, double noiseX, double noiseY,
+                       boolean sprinting, boolean sneaking, boolean hasNoise, double noiseX, double noiseY,
                        double noiseRadius) {
         double previousX = x;
         double previousY = y;
         double playerCenterX = playerX + 10;
         double playerCenterY = playerY + 12;
         double distance = Point.distance(centerX(), centerY(), playerCenterX, playerCenterY);
-        playerVisible = !hidden && distance <= (sprinting ? 252 : 195)
-            && (distance < 45 || inVisionCone(playerCenterX, playerCenterY))
-            && map.hasLineOfSight(centerX(), centerY(), playerCenterX, playerCenterY);
 
-        if (playerVisible) {
-            if (state == State.INSPECTING_ART) {
-                inspectingPainting = null;
-            }
-            state = State.CHASE;
-            lostSightTimer = 0;
-            goalX = playerX;
-            goalY = playerY;
-            stateTimer = 0;
-            searchTimer = 0;
-        } else if (state == State.CHASE) {
-            lostSightTimer += dt;
-            if (lostSightTimer >= 1.7) {
-                state = State.SEARCH;
-                searchAnchorX = goalX;
-                searchAnchorY = goalY;
-                searchTimer = 0;
-                searchOffset = 0;
-                stateTimer = 0;
-            }
-        }
+        double baseVisionRadius = guardType == GuardType.ELITE ? 240 : 195;
+        double visionMaxDist = state == State.CHASE ? (baseVisionRadius + 35) : (sprinting ? baseVisionRadius * 1.28 : baseVisionRadius);
+
+        playerVisible = !hidden && distance <= visionMaxDist
+            && (distance < 36 || inVisionCone(playerCenterX, playerCenterY))
+            && map.hasLineOfSight(centerX(), centerY(), playerCenterX, playerCenterY);
 
         if (speechBubbleTimer > 0) {
             speechBubbleTimer = Math.max(0, speechBubbleTimer - dt);
         }
 
+        // --- Suspicion & Detection Stage Evaluation ---
+        DetectionStage prevStage = detectionStage;
+
+        if (playerVisible) {
+            if (state == State.INSPECTING_ART) {
+                inspectingPainting = null;
+            }
+
+            // Suspicion buildup rate based on distance and player stealth
+            double rate = distance < 45 ? 90.0 : distance < 120 ? 55.0 : 35.0;
+            if (guardType == GuardType.ELITE) rate *= 1.45;
+            if (sprinting) rate *= 2.2;
+            else if (sneaking) rate *= 0.55;
+
+            suspicion = Math.min(100.0, suspicion + rate * dt);
+            lostSightTimer = 0;
+            goalX = playerX;
+            goalY = playerY;
+
+            // Turn toward the player immediately when spotted
+            double dx = playerCenterX - centerX();
+            double dy = playerCenterY - centerY();
+            double dist = Math.hypot(dx, dy);
+            if (dist > 0.001) {
+                facingX = dx / dist;
+                facingY = dy / dist;
+            }
+
+            if (suspicion >= 100.0) {
+                detectionStage = DetectionStage.CHASE;
+                if (state != State.CHASE) {
+                    state = State.CHASE;
+                    stateTimer = 0;
+                    searchTimer = 0;
+                    setSpeechBubble("HALT! INTRUDER!", new Color(255, 60, 60), 2.2);
+                }
+            } else if (suspicion >= 92.0) {
+                detectionStage = DetectionStage.ALERT;
+                if (state != State.CHASE && state != State.ALERT) {
+                    state = State.ALERT;
+                    stateTimer = 0;
+                    setSpeechBubble("INTRUDER SPOTTED!", new Color(255, 90, 50), 1.6);
+                }
+            } else if (suspicion >= 60.0) {
+                detectionStage = DetectionStage.INVESTIGATING;
+                if (state != State.CHASE && state != State.ALERT && state != State.INSPECT) {
+                    state = State.INSPECT;
+                    stateTimer = 0;
+                    setSpeechBubble("Hey! Who's that?!", new Color(255, 160, 40), 1.8);
+                }
+            } else if (suspicion >= 25.0) {
+                detectionStage = DetectionStage.SUSPICIOUS;
+                if (state == State.PATROL) {
+                    setSpeechBubble("...?", new Color(255, 215, 80), 1.2);
+                }
+            }
+        } else {
+            // Player is not directly visible
+            if (state == State.CHASE) {
+                lostSightTimer += dt;
+                if (lostSightTimer >= 1.8) {
+                    state = State.SEARCH;
+                    searchAnchorX = goalX;
+                    searchAnchorY = goalY;
+                    searchTimer = 0;
+                    searchOffset = 0;
+                    stateTimer = 0;
+                    setSpeechBubble("Where did they go?!", new Color(245, 175, 50), 2.0);
+                }
+            } else if (state == State.INSPECT) {
+                stateTimer += dt;
+                // If guard reaches suspicious spot and player is gone, investigate briefly then return
+                if (hasReachedGoal(goalX, goalY) || stateTimer >= 4.5) {
+                    state = State.RETURN;
+                    stateTimer = 0;
+                    setSpeechBubble("Nothing here... false alarm.", new Color(180, 210, 180), 2.0);
+                }
+            }
+
+            // Suspicion decays smoothly when out of sight
+            double decayRate = state == State.CHASE ? 12.0 : 25.0;
+            suspicion = Math.max(0.0, suspicion - dt * decayRate);
+
+            if (suspicion >= 100.0) detectionStage = DetectionStage.CHASE;
+            else if (suspicion >= 92.0) detectionStage = DetectionStage.ALERT;
+            else if (suspicion >= 60.0) detectionStage = DetectionStage.INVESTIGATING;
+            else if (suspicion >= 25.0) detectionStage = DetectionStage.SUSPICIOUS;
+            else detectionStage = DetectionStage.UNAWARE;
+        }
+
+        // --- Noise reaction ---
         if (!playerVisible && hasNoise && state != State.CHASE && state != State.SEARCH
             && state != State.INSPECTING_ART
             && Point.distance(centerX(), centerY(), noiseX, noiseY) <= noiseRadius) {
             goalX = noiseX - WIDTH / 2.0;
             goalY = noiseY - HEIGHT / 2.0;
-            state = State.ALERT;
+            suspicion = Math.max(suspicion, 65.0);
+            detectionStage = DetectionStage.INVESTIGATING;
+            state = State.INSPECT;
             stateTimer = 0;
+            setSpeechBubble("What was that sound?!", new Color(255, 185, 60), 2.0);
         }
 
+        // --- State Machine Updates ---
         switch (state) {
             case PATROL:
-                updatePatrol(dt, map);
+                if (detectionStage == DetectionStage.SUSPICIOUS && playerVisible) {
+                    // Pause briefly to inspect the disturbance
+                    moving = false;
+                } else {
+                    updatePatrol(dt, map);
+                }
                 break;
             case INSPECTING_ART:
                 moving = false;
@@ -120,22 +225,24 @@ public final class Guard {
                 }
                 break;
             case ALERT:
+                moving = false;
                 stateTimer += dt;
-                if (stateTimer >= 0.8) {
-                    state = State.INSPECT;
+                if (stateTimer >= 0.6) {
+                    state = suspicion >= 95.0 ? State.CHASE : State.INSPECT;
                     stateTimer = 0;
                 }
                 break;
             case INSPECT:
-                moveTo(dt, map, goalX, goalY, patrolSpeed + 4);
+                moveTo(dt, map, goalX, goalY, patrolSpeed + 6);
                 stateTimer += dt;
-                if (stateTimer >= 5 || hasReachedGoal(goalX, goalY)) {
+                if (stateTimer >= 5.0 || hasReachedGoal(goalX, goalY)) {
                     state = State.RETURN;
                     stateTimer = 0;
                 }
                 break;
             case CHASE:
-                moveTo(dt, map, goalX, goalY, 138);
+                double chaseSpeed = guardType == GuardType.ELITE ? 152.0 : 138.0;
+                moveTo(dt, map, goalX, goalY, chaseSpeed);
                 break;
             case SEARCH:
                 searchTimer += dt;
@@ -151,6 +258,7 @@ public final class Guard {
                 } else {
                     state = State.RETURN;
                     stateTimer = 0;
+                    setSpeechBubble("Lost them. Back to patrol.", new Color(180, 210, 180), 2.0);
                 }
                 break;
             case RETURN:
@@ -168,6 +276,12 @@ public final class Guard {
                 break;
         }
         moving = Math.abs(x - previousX) > 0.01 || Math.abs(y - previousY) > 0.01;
+    }
+
+    public void update(double dt, MuseumMap map, double playerX, double playerY, boolean hidden,
+                       boolean sprinting, boolean hasNoise, double noiseX, double noiseY,
+                       double noiseRadius) {
+        update(dt, map, playerX, playerY, hidden, sprinting, false, hasNoise, noiseX, noiseY, noiseRadius);
     }
 
     private boolean inVisionCone(double px, double py) {
@@ -343,5 +457,30 @@ public final class Guard {
 
     public double getSpeechBubbleTimer() {
         return speechBubbleTimer;
+    }
+
+    public double getSuspicion() {
+        return suspicion;
+    }
+
+    public DetectionStage getDetectionStage() {
+        return detectionStage;
+    }
+
+    public GuardType getGuardType() {
+        return guardType;
+    }
+
+    public double getVisionRadius() {
+        double base = guardType == GuardType.ELITE ? 240.0 : 195.0;
+        return state == State.CHASE ? (base + 35.0) : base;
+    }
+
+    public double getVisionAngleDegrees() {
+        return guardType == GuardType.ELITE ? 64.0 : 58.0;
+    }
+
+    public double getFacingAngle() {
+        return Math.atan2(facingY, facingX);
     }
 }

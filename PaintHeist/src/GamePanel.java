@@ -136,20 +136,26 @@ public class GamePanel extends JPanel {
     private int hoverX = -1;
     private int hoverY = -1;
     private String uiToast = "";
+    private int shopTab = 0;
     private int gallerySelectedWing = 0;
     private String galleryInspectedPainting = null;
     private int customizePreviewDirection = 0;
     private MuseumMap.Painting forgeryPainting;
     private BufferedImage forgeryCanvas;
     private final java.util.List<BufferedImage> forgeryUndoList = new java.util.ArrayList<>();
+    private final java.util.List<BufferedImage> forgeryRedoList = new java.util.ArrayList<>();
     private Color forgerySelectedColor = Color.BLACK;
+    private Color forgeryPreviousColor = Color.WHITE;
     private int forgeryBrushSize = 7;
     private boolean forgeryFillMode;
+    private boolean forgeryZoomed;
     private double forgeryTimeRemaining = 120.0;
     private double forgeryMaxTime = 120.0;
     private Point forgeryLastDrawPoint;
     private int forgeryAccuracyPreview;
+    private ForgeryEvaluator.EvaluationBreakdown forgeryBreakdownPreview;
     private boolean forgeryIsDrawing;
+    private double brushSoundCooldown;
 
     public GamePanel() {
         this(loadAssets());
@@ -392,6 +398,16 @@ public class GamePanel extends JPanel {
         bindAction("Z", "undo", () -> {
             if (screen == Screen.FORGERY) undoForgeryStroke();
         });
+        bindAction("Y", "redo", () -> {
+            if (screen == Screen.FORGERY) redoForgeryStroke();
+        });
+        bindAction("X", "zoomTool", () -> {
+            if (screen == Screen.FORGERY) {
+                forgeryZoomed = !forgeryZoomed;
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+            }
+        });
         bindAction("B", "brushTool", () -> {
             if (screen == Screen.FORGERY) {
                 forgeryFillMode = false;
@@ -443,6 +459,10 @@ public class GamePanel extends JPanel {
         } else if (code == KeyEvent.VK_Q) {
             if (!pressedKeys.contains("distract")) worldInputEdge("distract");
             pressedKeys.add("distract");
+        } else if (code == KeyEvent.VK_G || code == KeyEvent.VK_1) {
+            if (screen == Screen.PLAYING && world != null) {
+                world.deploySmokeBomb();
+            }
         } else if (code == KeyEvent.VK_ENTER || code == KeyEvent.VK_SPACE) {
             if (screen == Screen.CURATOR_INSPECTION) {
                 SoundEffects.play(SoundEffects.Cue.CLICK);
@@ -536,6 +556,7 @@ public class GamePanel extends JPanel {
             levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_THROW),
             levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_SWITCH)
         );
+        world.applyEquipmentLoadout(levelManager.getEquippedItems());
         screen = Screen.PLAYING;
         updateCursor();
         gameLoop.start();
@@ -862,6 +883,7 @@ public class GamePanel extends JPanel {
         for (Guard guard : game.getGuards()) drawGuard(g, guard);
         drawPlayer(g, game);
         drawDistractionEffect(g, game);
+        drawSmokeScreen(g, game);
         if (levelManager.isLightingEnabled()) {
             drawLighting(g, game.getPlayerCenterX(), game.getPlayerCenterY());
         }
@@ -873,25 +895,50 @@ public class GamePanel extends JPanel {
 
     private void drawGuardVision(Graphics2D g, java.util.List<Guard> guards) {
         for (Guard guard : guards) {
-            Point facing = guard.getFacing();
-            double angle = Math.atan2(facing.y, facing.x);
-            double radius = guard.getState() == Guard.State.CHASE ? 230 : 190;
+            double angle = guard.getFacingAngle();
+            double radius = guard.getVisionRadius();
+            double fovDegrees = guard.getVisionAngleDegrees();
             Path2D.Double cone = new Path2D.Double();
             cone.moveTo(guard.centerX(), guard.centerY());
             for (int step = 0; step <= 24; step++) {
-                double a = angle - Math.toRadians(58) + Math.toRadians(116) * step / 24.0;
+                double a = angle - Math.toRadians(fovDegrees) + Math.toRadians(fovDegrees * 2) * step / 24.0;
                 java.awt.geom.Point2D.Double endpoint = world.getMap().getVisionEndpoint(
                     guard.centerX(), guard.centerY(), a, radius);
                 cone.lineTo(endpoint.x, endpoint.y);
             }
             cone.closePath();
-            Color tint = guard.getState() == Guard.State.CHASE
-                ? new Color(210, 54, 59, 52)
-                : new Color(238, 191, 101, 28);
-            g.setColor(tint);
+
+            Guard.DetectionStage stage = guard.getDetectionStage();
+            Color fillTint;
+            Color borderTint;
+
+            if (guard.getState() == Guard.State.CHASE || stage == Guard.DetectionStage.CHASE) {
+                fillTint = new Color(225, 45, 45, 68);
+                borderTint = new Color(255, 65, 65, 175);
+            } else if (stage == Guard.DetectionStage.ALERT || guard.getState() == Guard.State.ALERT) {
+                fillTint = new Color(245, 80, 40, 58);
+                borderTint = new Color(255, 105, 50, 160);
+            } else if (stage == Guard.DetectionStage.INVESTIGATING || guard.getState() == Guard.State.INSPECT) {
+                fillTint = new Color(245, 140, 30, 48);
+                borderTint = new Color(255, 165, 45, 145);
+            } else if (stage == Guard.DetectionStage.SUSPICIOUS) {
+                fillTint = new Color(245, 195, 45, 38);
+                borderTint = new Color(255, 215, 65, 130);
+            } else {
+                fillTint = new Color(238, 205, 110, 24);
+                borderTint = new Color(238, 205, 110, 85);
+            }
+
+            g.setColor(fillTint);
             g.fill(cone);
-            g.setColor(new Color(tint.getRed(), tint.getGreen(), tint.getBlue(), 95));
+            g.setColor(borderTint);
             g.draw(cone);
+
+            // Subtle center flashlight sightline to clearly show looking direction
+            java.awt.geom.Point2D.Double centerBeam = world.getMap().getVisionEndpoint(
+                guard.centerX(), guard.centerY(), angle, radius * 0.95);
+            g.setColor(new Color(borderTint.getRed(), borderTint.getGreen(), borderTint.getBlue(), 60));
+            g.drawLine((int) guard.centerX(), (int) guard.centerY(), (int) centerBeam.x, (int) centerBeam.y);
         }
     }
 
@@ -1057,6 +1104,46 @@ public class GamePanel extends JPanel {
         g.fillRect(x - 3, y - 3, 6, 6);
     }
 
+    private void drawSmokeScreen(Graphics2D g, GameWorld game) {
+        if (!game.isSmokeActive()) return;
+        double cx = game.getSmokeX();
+        double cy = game.getSmokeY();
+        double timer = game.getSmokeActiveTimer();
+        int baseRadius = 82;
+
+        // Render soft multi-layered swirling smoke cloud puffs
+        double t = animationFrame * 0.08;
+        for (int i = 0; i < 9; i++) {
+            double angle = (i * 2.0 * Math.PI / 9.0) + Math.sin(t + i) * 0.4;
+            double dist = 24.0 + Math.cos(t * 0.8 + i * 1.3) * 28.0;
+            int px = (int) Math.round(cx + Math.cos(angle) * dist);
+            int py = (int) Math.round(cy + Math.sin(angle) * dist);
+            int puffR = 38 + (int) (Math.sin(t + i * 2) * 8);
+
+            int alpha = (int) (65 + 30 * Math.sin(t + i));
+            g.setColor(new Color(215, 222, 235, Math.min(140, Math.max(30, alpha))));
+            g.fillOval(px - puffR, py - puffR, puffR * 2, puffR * 2);
+            g.setColor(new Color(110, 120, 138, Math.min(100, Math.max(20, alpha - 25))));
+            g.drawOval(px - puffR, py - puffR, puffR * 2, puffR * 2);
+        }
+
+        // Inner dense core
+        int coreAlpha = Math.min(180, (int) (110 + 40 * Math.sin(t * 1.5)));
+        g.setColor(new Color(230, 235, 245, coreAlpha));
+        g.fillOval((int) Math.round(cx - 36), (int) Math.round(cy - 36), 72, 72);
+
+        // Outer boundary ring
+        g.setColor(new Color(200, 220, 245, 90));
+        g.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 1.0f, new float[]{6f, 6f}, (float) (animationFrame * 0.5)));
+        g.drawOval((int) Math.round(cx - baseRadius), (int) Math.round(cy - baseRadius), baseRadius * 2, baseRadius * 2);
+        g.setStroke(new BasicStroke(1.0f));
+
+        // Floating tactical smoke countdown label
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setColor(new Color(235, 245, 255));
+        drawCentered(g, "☁ SMOKE BLIND (" + String.format("%.1f", timer) + "s)", (int) Math.round(cx), (int) Math.round(cy - baseRadius - 6));
+    }
+
     private void drawHideSpot(Graphics2D g, MuseumMap.HideSpot spot, boolean near, boolean occupied) {
         java.awt.Rectangle r = spot.getBounds();
         g.setColor(new Color(32, 27, 35));
@@ -1074,6 +1161,33 @@ public class GamePanel extends JPanel {
         g.setFont(new Font("Monospaced", Font.BOLD, 8));
         g.setColor(occupied ? new Color(119, 232, 160) : new Color(238, 221, 180));
         g.drawString(occupied ? "HIDDEN" : "HIDE", r.x + 5, r.y + r.height - 4);
+
+        if (near || occupied) {
+            int bob = (int) Math.round(Math.sin(animationFrame * 0.16) * 3);
+            int badgeW = occupied ? 64 : 62;
+            int badgeH = 18;
+            int bx = r.x + r.width / 2 - badgeW / 2;
+            int by = r.y - 22 + bob;
+
+            g.setColor(new Color(12, 15, 22, 230));
+            g.fillRoundRect(bx, by, badgeW, badgeH, 5, 5);
+            g.setColor(occupied ? new Color(119, 232, 160) : new Color(255, 215, 0));
+            g.drawRoundRect(bx, by, badgeW, badgeH, 5, 5);
+
+            int kx = bx + 3;
+            int ky = by + 2;
+            g.setColor(new Color(210, 165, 60));
+            g.fillRoundRect(kx, ky, 14, 14, 3, 3);
+            g.setColor(new Color(255, 238, 150));
+            g.fillRoundRect(kx + 1, ky + 1, 12, 10, 2, 2);
+            g.setColor(new Color(35, 25, 10));
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            g.drawString("E", kx + 3, ky + 9);
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 8));
+            g.setColor(new Color(255, 240, 200));
+            g.drawString(occupied ? "EXIT" : "HIDE", kx + 18, by + 12);
+        }
     }
 
     private void drawGuard(Graphics2D g, Guard guard) {
@@ -1092,14 +1206,50 @@ public class GamePanel extends JPanel {
         g.drawImage(guardSprites[action][direction][frame], x - 4,
             y + Guard.HEIGHT - GUARD_SPRITE_HEIGHT,
             GUARD_SPRITE_WIDTH, GUARD_SPRITE_HEIGHT, null);
-        if (guard.getState() == Guard.State.CHASE || guard.getState() == Guard.State.ALERT) {
-            g.setFont(new Font("Monospaced", Font.BOLD, 14));
-            g.setColor(chasing ? new Color(255, 87, 76) : GOLD);
-            g.drawString(chasing ? "!" : "?", x + 7, y + Guard.HEIGHT - GUARD_SPRITE_HEIGHT - 3);
-        }
-
-        // --- Live Art Inspection Badge & Suspense Progress Bar ---
         int headY = y + Guard.HEIGHT - GUARD_SPRITE_HEIGHT;
+
+        // --- Overhead Suspicion & Detection Stage Indicator ---
+        Guard.DetectionStage stage = guard.getDetectionStage();
+        double suspicion = guard.getSuspicion();
+
+        if (!guard.isInspectingArt() && (stage != Guard.DetectionStage.UNAWARE || suspicion > 5.0 || chasing)) {
+            int meterW = 32;
+            int meterH = 5;
+            int meterX = (int) guard.centerX() - meterW / 2;
+            int meterY = headY - 10;
+
+            // Background pill
+            g.setColor(new Color(15, 12, 20, 220));
+            g.fillRoundRect(meterX - 1, meterY - 1, meterW + 2, meterH + 2, 4, 4);
+
+            // Meter fill
+            int fillW = (int) Math.round(meterW * (Math.min(100.0, suspicion) / 100.0));
+            Color meterColor = (suspicion >= 92.0 || chasing) ? new Color(240, 55, 55)
+                : (suspicion >= 60.0) ? new Color(245, 145, 35)
+                : (suspicion >= 25.0) ? new Color(250, 205, 55)
+                : new Color(180, 220, 120);
+
+            g.setColor(meterColor);
+            g.fillRoundRect(meterX, meterY, fillW, meterH, 3, 3);
+            g.setColor(new Color(70, 60, 50));
+            g.drawRoundRect(meterX - 1, meterY - 1, meterW + 2, meterH + 2, 4, 4);
+
+            // Detection Stage Icon above the meter
+            g.setFont(new Font("Monospaced", Font.BOLD, 13));
+            if (chasing || stage == Guard.DetectionStage.CHASE) {
+                g.setColor(new Color(255, 60, 60));
+                drawCentered(g, "!", (int) guard.centerX(), meterY - 4);
+            } else if (stage == Guard.DetectionStage.ALERT) {
+                g.setColor(new Color(255, 95, 45));
+                drawCentered(g, "!", (int) guard.centerX(), meterY - 4);
+            } else if (stage == Guard.DetectionStage.INVESTIGATING) {
+                g.setColor(new Color(255, 160, 40));
+                drawCentered(g, "?", (int) guard.centerX(), meterY - 4);
+            } else if (stage == Guard.DetectionStage.SUSPICIOUS) {
+                g.setColor(new Color(255, 215, 75));
+                drawCentered(g, "?", (int) guard.centerX(), meterY - 4);
+            }
+        }
         if (guard.isInspectingArt()) {
             int bw = 72;
             int bh = 14;
@@ -1653,7 +1803,7 @@ public class GamePanel extends JPanel {
             g.drawRoundRect(sx, barY, segW, segH, 2, 2);
         }
 
-        // 6. GADGETS: COIN DISTRACTION & NOISE
+        // 6. GADGETS: COIN DISTRACTION & EQUIPMENT
         int gadgetX = 798;
         int getY = 12;
         int getW = 146;
@@ -1665,26 +1815,74 @@ public class GamePanel extends JPanel {
 
         double distCd = game.getDistractionCooldown();
         boolean coinReady = distCd <= 0;
-        int coinSize = 20;
-        int cx = gadgetX + 10;
-        int cy = getY + (getH - coinSize) / 2;
+        int coinSize = 18;
+        int cx = gadgetX + 8;
+        int cy = getY + 6;
         g.setColor(coinReady ? new Color(255, 215, 0) : new Color(130, 135, 145));
         g.fillOval(cx, cy, coinSize, coinSize);
         g.setColor(coinReady ? new Color(210, 165, 20) : new Color(90, 95, 105));
         g.drawOval(cx, cy, coinSize, coinSize);
         g.setColor(Color.WHITE);
-        g.setFont(new Font("Monospaced", Font.BOLD, 11));
-        g.drawString("¢", cx + 7, cy + 14);
-
         g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.drawString("¢", cx + 6, cy + 13);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 9));
         g.setColor(coinReady ? new Color(130, 240, 160) : new Color(200, 190, 205));
         String coinStr = coinReady ? "Q: COIN READY" : "Q: " + (int) Math.ceil(distCd) + "s CD";
-        g.drawString(coinStr, gadgetX + 36, getY + 20);
+        g.drawString(coinStr, gadgetX + 32, getY + 18);
 
-        int noises = game.getNoiseSystem().getEvents().size();
+        if (game.hasSmokeBomb()) {
+            boolean active = game.isSmokeActive();
+            int bombs = game.getSmokeBombsRemaining();
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            if (active) {
+                g.setColor(new Color(110, 235, 255));
+                g.drawString("1/G: SMOKE " + String.format("%.1f", game.getSmokeActiveTimer()) + "s", gadgetX + 8, getY + 36);
+            } else if (bombs > 0) {
+                g.setColor(new Color(245, 215, 120));
+                g.drawString("1/G: SMOKE (x" + bombs + ")", gadgetX + 8, getY + 36);
+            } else {
+                g.setColor(new Color(150, 140, 145));
+                g.drawString("1/G: SMOKE (EMPTY)", gadgetX + 8, getY + 36);
+            }
+        } else {
+            int noises = game.getNoiseSystem().getEvents().size();
+            g.setFont(new Font("Monospaced", Font.BOLD, 8));
+            g.setColor(noises == 0 ? new Color(140, 150, 165) : new Color(255, 180, 90));
+            g.drawString(noises == 0 ? "NOISE: QUIET" : "NOISE: " + noises + " HEARD", gadgetX + 32, getY + 36);
+        }
+
+        // Tactical passive loadout chips (under top bar)
+        int chipX = 16;
+        int chipY = 72;
         g.setFont(new Font("Monospaced", Font.BOLD, 8));
-        g.setColor(noises == 0 ? new Color(140, 150, 165) : new Color(255, 180, 90));
-        g.drawString(noises == 0 ? "NOISE: QUIET" : "NOISE: " + noises + " HEARD", gadgetX + 36, getY + 34);
+        if (game.hasSilentShoes()) {
+            drawTacticalChip(g, "👟 SILENT SOLES", chipX, chipY, new Color(46, 204, 113));
+            chipX += 105;
+        }
+        if (game.hasLockpickKit()) {
+            drawTacticalChip(g, "🔑 LOCKPICK KIT", chipX, chipY, new Color(241, 196, 15));
+            chipX += 105;
+        }
+        if (game.hasQuickDrawBrush()) {
+            drawTacticalChip(g, "🖌 QUICK-DRAW", chipX, chipY, new Color(52, 152, 219));
+            chipX += 95;
+        }
+        if (game.hasDistractionDevice()) {
+            drawTacticalChip(g, "🎯 LONG PITCH", chipX, chipY, new Color(155, 89, 182));
+            chipX += 95;
+        }
+    }
+
+    private void drawTacticalChip(Graphics2D g, String label, int x, int y, Color accent) {
+        int w = g.getFontMetrics().stringWidth(label) + 12;
+        int h = 16;
+        g.setColor(new Color(14, 18, 26, 210));
+        g.fillRoundRect(x, y, w, h, 4, 4);
+        g.setColor(accent);
+        g.drawRoundRect(x, y, w, h, 4, 4);
+        g.setColor(new Color(240, 245, 255));
+        g.drawString(label, x + 6, y + 11);
     }
 
     private void drawMinimap(Graphics2D g, GameWorld game) {
@@ -1918,13 +2116,23 @@ public class GamePanel extends JPanel {
         drawCentered(g, "ARROWS / WASD SELECT   ENTER TO PLAY   ESC TO BACK", WIDTH / 2, 575);
     }
 
+    private Rectangle shopTabEquipmentBounds() {
+        return new Rectangle(180, 72, 280, 26);
+    }
+
+    private Rectangle shopTabDisguisesBounds() {
+        return new Rectangle(500, 72, 280, 26);
+    }
+
     private Rectangle shopItemBounds(int index) {
         int col = index / 3;
         int row = index % 3;
-        return new Rectangle(64 + col * 432, 110 + row * 122, 400, 112);
+        return new Rectangle(64 + col * 432, 108 + row * 122, 400, 112);
     }
 
     private int shopItemAt(int x, int y) {
+        if (shopTabEquipmentBounds().contains(x, y)) return 100;
+        if (shopTabDisguisesBounds().contains(x, y)) return 101;
         for (int i = 0; i < 6; i++) {
             if (shopItemBounds(i).contains(x, y)) return i;
         }
@@ -1933,39 +2141,63 @@ public class GamePanel extends JPanel {
 
     private void handleShopClick(int item) {
         SoundEffects.play(SoundEffects.Cue.CLICK);
-        if (item == 0) {
-            if (levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY)) {
-                uiToast = "QUICK FORGER IS ALREADY OWNED.";
-            } else if (levelManager.buyUpgrade(LevelManager.UPGRADE_FAST_COPY, 20)) {
-                uiToast = "UNLOCKED QUICK FORGER (+30S FORGERY TIME)!";
-            } else {
-                uiToast = "NEED 20 CREDITS FOR QUICK FORGER.";
-            }
-        } else if (item == 1) {
-            if (levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_THROW)) {
-                uiToast = "LONG PITCH IS ALREADY OWNED.";
-            } else if (levelManager.buyUpgrade(LevelManager.UPGRADE_LONG_THROW, 15)) {
-                uiToast = "UNLOCKED LONG PITCH (+35% THROW RANGE)!";
-            } else {
-                uiToast = "NEED 15 CREDITS FOR LONG PITCH.";
-            }
-        } else if (item == 2) {
-            if (levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_SWITCH)) {
-                uiToast = "CIRCUIT JAMMER IS ALREADY OWNED.";
-            } else if (levelManager.buyUpgrade(LevelManager.UPGRADE_LONG_SWITCH, 25)) {
-                uiToast = "UNLOCKED CIRCUIT JAMMER (+5S SWITCH TIME)!";
-            } else {
-                uiToast = "NEED 25 CREDITS FOR CIRCUIT JAMMER.";
+        if (item == 100) {
+            shopTab = 0;
+            repaint();
+            return;
+        }
+        if (item == 101) {
+            shopTab = 1;
+            repaint();
+            return;
+        }
+
+        if (shopTab == 0) {
+            // Equipment Tab
+            if (item >= 0 && item < 5) {
+                String key = LevelManager.ALL_EQUIPMENT[item];
+                String name = LevelManager.EQUIPMENT_NAMES[item];
+                int cost = LevelManager.EQUIPMENT_COSTS[item];
+                if (!levelManager.hasUpgrade(key)) {
+                    if (levelManager.buyUpgrade(key, cost)) {
+                        uiToast = "UNLOCKED & EQUIPPED " + name.toUpperCase() + "!";
+                        SoundEffects.play(SoundEffects.Cue.SWAP);
+                    } else {
+                        uiToast = "NEED " + cost + " CREDITS FOR " + name.toUpperCase() + ".";
+                    }
+                } else {
+                    if (levelManager.isEquipped(key)) {
+                        levelManager.toggleEquip(key);
+                        uiToast = "UNEQUIPPED " + name.toUpperCase() + " FROM LOADOUT.";
+                        SoundEffects.play(SoundEffects.Cue.CLICK);
+                    } else {
+                        if (levelManager.getEquippedCount() < LevelManager.MAX_EQUIPPED) {
+                            levelManager.toggleEquip(key);
+                            uiToast = "EQUIPPED " + name.toUpperCase() + " (" + levelManager.getEquippedCount() + "/2)!";
+                            SoundEffects.play(SoundEffects.Cue.SWAP);
+                        } else {
+                            uiToast = "LOADOUT FULL (MAX 2). UNEQUIP AN ITEM TO EQUIP THIS.";
+                        }
+                    }
+                }
+            } else if (item == 5) {
+                uiToast = "TACTICAL LOADOUT: Max 2 items armed for museum infiltration.";
             }
         } else {
-            int outfitIndex = item - 2;
-            boolean wasUnlocked = levelManager.isOutfitUnlocked(outfitIndex);
-            if (levelManager.selectOrBuyOutfit(outfitIndex)) {
-                uiToast = (wasUnlocked ? "EQUIPPED " : "PURCHASED & EQUIPPED ")
-                    + LevelManager.OUTFIT_NAMES[outfitIndex].toUpperCase() + "!";
+            // Disguises Tab
+            if (item >= 0 && item < 4) {
+                int outfitIndex = item;
+                boolean wasUnlocked = levelManager.isOutfitUnlocked(outfitIndex);
+                if (levelManager.selectOrBuyOutfit(outfitIndex)) {
+                    uiToast = (wasUnlocked ? "EQUIPPED " : "PURCHASED & EQUIPPED ")
+                        + LevelManager.OUTFIT_NAMES[outfitIndex].toUpperCase() + "!";
+                    SoundEffects.play(SoundEffects.Cue.SWAP);
+                } else {
+                    uiToast = "NEED " + LevelManager.OUTFIT_COSTS[outfitIndex] + " CREDITS FOR "
+                        + LevelManager.OUTFIT_NAMES[outfitIndex].toUpperCase() + ".";
+                }
             } else {
-                uiToast = "NEED " + LevelManager.OUTFIT_COSTS[outfitIndex] + " CREDITS FOR "
-                    + LevelManager.OUTFIT_NAMES[outfitIndex].toUpperCase() + ".";
+                uiToast = "WARDROBE ATELIER: Master thief disguises provide legendary flair.";
             }
         }
         updateCursor();
@@ -1974,27 +2206,25 @@ public class GamePanel extends JPanel {
 
     private void drawGadgetIcon(Graphics2D g, int id, int cx, int cy, int size) {
         if (id == 0) {
-            // Quick Forger: Pocket Chronometer
-            int r = size / 2;
-            g.setColor(new Color(220, 175, 65));
-            g.fillOval(cx - r, cy - r, size, size);
-            g.setColor(new Color(255, 248, 220));
-            g.fillOval(cx - r + 3, cy - r + 3, size - 6, size - 6);
-            g.setColor(new Color(70, 50, 20));
-            g.drawOval(cx - r, cy - r, size, size);
-            g.setStroke(new BasicStroke(2.0f));
-            g.drawLine(cx, cy, cx - 7, cy - 8);
-            g.drawLine(cx, cy, cx + 9, cy - 5);
-            g.setStroke(new BasicStroke(1.0f));
-            g.setColor(new Color(220, 175, 65));
-            g.fillRect(cx - 3, cy - r - 4, 6, 4);
-            g.drawOval(cx - 5, cy - r - 8, 10, 6);
+            // Smoke Bomb: Tactical canister with grenade pin & smoke wisps
+            g.setColor(new Color(55, 65, 52));
+            g.fillRoundRect(cx - 10, cy - 8, 20, 26, 4, 4);
+            g.setColor(new Color(120, 140, 115));
+            g.drawRoundRect(cx - 10, cy - 8, 20, 26, 4, 4);
+            g.setColor(new Color(35, 42, 32));
+            g.fillRect(cx - 6, cy - 14, 12, 6);
+            g.setColor(new Color(245, 215, 120));
+            g.drawOval(cx - 8, cy - 20, 8, 8); // Pin
+            // Smoke cloud wisp
+            g.setColor(new Color(220, 230, 245, 160));
+            g.fillOval(cx + 4, cy - 18, 14, 12);
+            g.fillOval(cx + 10, cy - 14, 10, 10);
         } else if (id == 1) {
-            // Long Pitch: Distraction Coin with velocity trail
+            // Distraction Device: Weighted acoustic coin with sonic rings
             int cr = size / 3;
             g.setColor(new Color(110, 220, 240, 180));
-            g.drawArc(cx - 18, cy - 10, 36, 26, 40, 150);
-            g.drawArc(cx - 14, cy - 6, 28, 20, 40, 140);
+            g.drawArc(cx - 20, cy - 12, 40, 28, 40, 150);
+            g.drawArc(cx - 15, cy - 8, 30, 22, 40, 140);
             g.setColor(new Color(255, 215, 0));
             g.fillOval(cx - cr + 4, cy - cr - 2, cr * 2, cr * 2);
             g.setColor(new Color(180, 130, 20));
@@ -2002,21 +2232,61 @@ public class GamePanel extends JPanel {
             g.setColor(new Color(60, 40, 10));
             g.setFont(new Font("Monospaced", Font.BOLD, 11));
             g.drawString("¢", cx + 1, cy + 4);
+        } else if (id == 2) {
+            // Lockpick Kit: Crossed tension wrench and skeleton pick
+            g.setColor(new Color(205, 215, 230));
+            g.setStroke(new BasicStroke(2.0f));
+            g.drawLine(cx - 16, cy + 12, cx + 14, cy - 14); // Pick shaft
+            g.drawLine(cx + 14, cy - 14, cx + 18, cy - 10); // Pick hook
+            g.drawLine(cx - 12, cy - 12, cx + 16, cy + 14); // Wrench shaft
+            g.drawLine(cx + 16, cy + 14, cx + 16, cy + 8); // Wrench lip
+            g.setStroke(new BasicStroke(1.0f));
+            g.setColor(new Color(230, 190, 80));
+            g.fillRoundRect(cx - 18, cy + 10, 8, 8, 2, 2);
+            g.fillRoundRect(cx - 14, cy - 16, 8, 8, 2, 2);
+        } else if (id == 3) {
+            // Silent Shoes: Stealth low-profile infiltrator boot with padded sole
+            g.setColor(new Color(24, 26, 36));
+            int[] sx = {cx - 16, cx - 12, cx - 4, cx + 12, cx + 16, cx + 16, cx - 16};
+            int[] sy = {cy + 6, cy - 10, cy - 8, cy - 2, cy + 4, cy + 8, cy + 8};
+            g.fillPolygon(sx, sy, 7);
+            g.setColor(new Color(65, 80, 105));
+            g.drawPolygon(sx, sy, 7);
+            // Mint acoustic foam sole
+            g.setColor(new Color(110, 235, 170));
+            g.fillRect(cx - 16, cy + 8, 32, 4);
+            g.setColor(new Color(40, 50, 60));
+            for (int k = cx - 12; k < cx + 14; k += 6) {
+                g.drawLine(k, cy + 8, k, cy + 12);
+            }
+        } else if (id == 4) {
+            // Quick-Draw Brush: Master sable hair brush
+            g.setColor(new Color(145, 65, 40));
+            g.setStroke(new BasicStroke(3.0f));
+            g.drawLine(cx - 16, cy + 16, cx + 8, cy - 8); // Handle
+            g.setStroke(new BasicStroke(1.0f));
+            // Brass ferrule
+            g.setColor(new Color(255, 215, 95));
+            g.fillRect(cx + 6, cy - 10, 6, 6);
+            // Sable hair tip
+            g.setColor(new Color(45, 32, 25));
+            int[] tx = {cx + 10, cx + 18, cx + 14};
+            int[] ty = {cy - 12, cy - 18, cy - 8};
+            g.fillPolygon(tx, ty, 3);
+            // Gold wet pigment drop
+            g.setColor(new Color(255, 225, 110));
+            g.fillOval(cx + 16, cy - 20, 4, 4);
         } else {
-            // Circuit Jammer: Tactical EMP Unit
-            int bw = size - 12;
-            int bh = size - 8;
-            g.setColor(new Color(30, 42, 58));
-            g.fillRoundRect(cx - bw / 2, cy - bh / 2, bw, bh, 5, 5);
-            g.setColor(new Color(56, 189, 248));
-            g.drawRoundRect(cx - bw / 2, cy - bh / 2, bw, bh, 5, 5);
-            g.drawLine(cx - bw / 2 + 4, cy - 4, cx - 2, cy - 4);
-            g.drawLine(cx - 2, cy - 4, cx - 2, cy + 6);
-            g.drawLine(cx + bw / 2 - 4, cy + 4, cx + 2, cy + 4);
-            int[] lx = {cx, cx - 4, cx + 1, cx - 1, cx + 5, cx};
-            int[] ly = {cy - 10, cy - 1, cy - 1, cy + 9, cy, cy};
-            g.setColor(new Color(255, 240, 120));
-            g.fillPolygon(lx, ly, 6);
+            // Operative Satchel
+            g.setColor(new Color(115, 80, 45));
+            g.fillRoundRect(cx - 16, cy - 12, 32, 24, 4, 4);
+            g.setColor(new Color(175, 130, 80));
+            g.drawRoundRect(cx - 16, cy - 12, 32, 24, 4, 4);
+            // Flap and brass clasp
+            g.setColor(new Color(85, 55, 30));
+            g.fillRect(cx - 16, cy - 12, 32, 10);
+            g.setColor(new Color(255, 215, 100));
+            g.fillRect(cx - 3, cy - 4, 6, 6);
         }
     }
 
@@ -2041,146 +2311,292 @@ public class GamePanel extends JPanel {
         drawBackdrop(g);
 
         // Header Title
-        g.setFont(new Font("Monospaced", Font.BOLD, 24));
+        g.setFont(new Font("Monospaced", Font.BOLD, 22));
         g.setColor(new Color(255, 222, 140));
-        drawCentered(g, "BLACK MARKET FENCE & ATELIER", WIDTH / 2, 56);
+        drawCentered(g, "BLACK MARKET FENCE & ATELIER", WIDTH / 2, 46);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
-        g.setColor(new Color(195, 185, 205));
-        drawCentered(g, "Contraband equipment & custom operative cloaks for master heists.", WIDTH / 2, 72);
-
-        // Heist Credits Badge Pill
-        int credW = 210, credH = 22;
-        int credX = (WIDTH - credW) / 2, credY = 80;
+        // Heist Credits Badge Pill (Top-Right)
+        int credW = 200, credH = 22;
+        int credX = WIDTH - credW - 54, credY = 32;
         g.setColor(new Color(24, 22, 32, 230));
         g.fillRoundRect(credX, credY, credW, credH, 8, 8);
         g.setColor(new Color(180, 140, 70));
         g.drawRoundRect(credX, credY, credW, credH, 8, 8);
-
         g.setColor(new Color(255, 215, 0));
-        g.fillOval(credX + 10, credY + 3, 16, 16);
+        g.fillOval(credX + 8, credY + 3, 16, 16);
         g.setColor(new Color(40, 30, 10));
         g.setFont(new Font("Monospaced", Font.BOLD, 10));
-        g.drawString("¢", credX + 15, credY + 15);
-
+        g.drawString("¢", credX + 13, credY + 15);
         g.setFont(new Font("Monospaced", Font.BOLD, 11));
         g.setColor(new Color(255, 235, 175));
-        g.drawString("HEIST CREDITS: " + levelManager.getTotalRewards() + " CR", credX + 34, credY + 16);
+        g.drawString("CREDITS: " + levelManager.getTotalRewards() + " CR", credX + 30, credY + 16);
 
-        String[] names = {
-            "QUICK FORGER", "LONG PITCH", "CIRCUIT JAMMER",
-            LevelManager.OUTFIT_NAMES[1].toUpperCase(),
-            LevelManager.OUTFIT_NAMES[2].toUpperCase(),
-            LevelManager.OUTFIT_NAMES[3].toUpperCase()
-        };
-        String[] descs = {
-            "+30s replication time in Studio",
-            "Throw distraction coins 35% farther",
-            "Security switches offline 5s longer",
-            "Velvet ruby cloak for midnight heists",
-            "Specialist jade weave for ghost runs",
-            "Gold trim trophy coat for legends"
-        };
-        int[] costs = {
-            20, 15, 25,
-            LevelManager.OUTFIT_COSTS[1], LevelManager.OUTFIT_COSTS[2], LevelManager.OUTFIT_COSTS[3]
-        };
-        boolean[] owned = {
-            levelManager.hasUpgrade(LevelManager.UPGRADE_FAST_COPY),
-            levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_THROW),
-            levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_SWITCH),
-            levelManager.isOutfitUnlocked(1),
-            levelManager.isOutfitUnlocked(2),
-            levelManager.isOutfitUnlocked(3)
-        };
+        // TAB BAR
+        Rectangle tab0 = shopTabEquipmentBounds();
+        Rectangle tab1 = shopTabDisguisesBounds();
+        boolean hoverTab0 = hoverX >= 0 && hoverY >= 0 && tab0.contains(hoverX, hoverY);
+        boolean hoverTab1 = hoverX >= 0 && hoverY >= 0 && tab1.contains(hoverX, hoverY);
 
-        for (int i = 0; i < 6; i++) {
-            Rectangle card = shopItemBounds(i);
-            boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
-            boolean equipped = i >= 3 && levelManager.getSelectedOutfit() == (i - 2);
+        g.setColor(shopTab == 0 ? new Color(60, 48, 30) : hoverTab0 ? new Color(36, 32, 42) : new Color(22, 20, 28));
+        g.fillRoundRect(tab0.x, tab0.y, tab0.width, tab0.height, 6, 6);
+        g.setColor(shopTab == 0 ? GOLD : hoverTab0 ? new Color(180, 160, 130) : new Color(65, 58, 52));
+        g.drawRoundRect(tab0.x, tab0.y, tab0.width, tab0.height, 6, 6);
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(shopTab == 0 ? new Color(255, 235, 175) : new Color(175, 170, 185));
+        drawCentered(g, "⚙ TACTICAL EQUIPMENT (" + levelManager.getEquippedCount() + "/" + LevelManager.MAX_EQUIPPED + " ARMED)",
+            tab0.x + tab0.width / 2, tab0.y + 17);
 
-            g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
-            g.fillRoundRect(card.x, card.y, card.width, card.height, 10, 10);
-            g.setColor(equipped ? new Color(245, 215, 120) : hovered ? GOLD : owned[i] ? new Color(110, 160, 120) : new Color(90, 75, 65));
-            g.drawRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+        g.setColor(shopTab == 1 ? new Color(60, 48, 30) : hoverTab1 ? new Color(36, 32, 42) : new Color(22, 20, 28));
+        g.fillRoundRect(tab1.x, tab1.y, tab1.width, tab1.height, 6, 6);
+        g.setColor(shopTab == 1 ? GOLD : hoverTab1 ? new Color(180, 160, 130) : new Color(65, 58, 52));
+        g.drawRoundRect(tab1.x, tab1.y, tab1.width, tab1.height, 6, 6);
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setColor(shopTab == 1 ? new Color(255, 235, 175) : new Color(175, 170, 185));
+        drawCentered(g, "🎭 OPERATIVE CLOAKS & ATELIER", tab1.x + tab1.width / 2, tab1.y + 17);
 
-            // Left icon / showcase box (x + 10, y + 10, 80, 94)
-            int ibx = card.x + 10, iby = card.y + 10, ibw = 80, ibh = 94;
-            g.setColor(new Color(16, 14, 20));
-            g.fillRoundRect(ibx, iby, ibw, ibh, 6, 6);
-            g.setColor(new Color(60, 50, 45));
-            g.drawRoundRect(ibx, iby, ibw, ibh, 6, 6);
+        if (shopTab == 0) {
+            // --- TACTICAL EQUIPMENT TAB ---
+            for (int i = 0; i < 6; i++) {
+                Rectangle card = shopItemBounds(i);
+                boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
 
-            if (i < 3) {
-                drawGadgetIcon(g, i, ibx + ibw / 2, iby + ibh / 2, 48);
-            } else {
-                drawDisguiseMannequin(g, i - 2, ibx + ibw / 2, iby + ibh / 2 + 10);
-            }
+                if (i < 5) {
+                    String key = LevelManager.ALL_EQUIPMENT[i];
+                    String name = LevelManager.EQUIPMENT_NAMES[i];
+                    String desc = LevelManager.EQUIPMENT_DESCRIPTIONS[i];
+                    int cost = LevelManager.EQUIPMENT_COSTS[i];
+                    boolean owned = levelManager.hasUpgrade(key);
+                    boolean equipped = levelManager.isEquipped(key);
 
-            // Right content
-            int tx = card.x + 100;
-            g.setFont(new Font("Monospaced", Font.BOLD, 13));
-            g.setColor(new Color(255, 225, 155));
-            g.drawString(names[i], tx, card.y + 26);
+                    g.setColor(equipped ? new Color(32, 45, 36) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
+                    g.fillRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+                    g.setColor(equipped ? new Color(85, 225, 140) : hovered ? GOLD : owned ? new Color(110, 160, 120) : new Color(90, 75, 65));
+                    g.drawRoundRect(card.x, card.y, card.width, card.height, 10, 10);
 
-            g.setFont(new Font("Monospaced", Font.BOLD, 9));
-            g.setColor(i < 3 ? new Color(110, 230, 180) : new Color(245, 175, 80));
-            g.drawString(i < 3 ? "[TACTICAL GADGET]" : "[THIEF DISGUISE]", tx, card.y + 40);
+                    // Left icon box
+                    int ibx = card.x + 10, iby = card.y + 10, ibw = 80, ibh = 92;
+                    g.setColor(new Color(16, 14, 20));
+                    g.fillRoundRect(ibx, iby, ibw, ibh, 6, 6);
+                    g.setColor(new Color(60, 50, 45));
+                    g.drawRoundRect(ibx, iby, ibw, ibh, 6, 6);
+                    drawGadgetIcon(g, i, ibx + ibw / 2, iby + ibh / 2, 48);
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-            g.setColor(new Color(195, 190, 205));
-            g.drawString(descs[i], tx, card.y + 57);
+                    // Right content
+                    int tx = card.x + 100;
+                    g.setFont(new Font("Monospaced", Font.BOLD, 13));
+                    g.setColor(new Color(255, 225, 155));
+                    g.drawString(name.toUpperCase(), tx, card.y + 24);
 
-            // Interactive Button Pill
-            int btnX = tx;
-            int btnY = card.y + 72;
-            int btnW = 180;
-            int btnH = 28;
+                    g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                    g.setColor(new Color(110, 230, 180));
+                    g.drawString("[TACTICAL GADGET]", tx, card.y + 38);
 
-            if (equipped) {
-                g.setColor(new Color(25, 65, 38));
-                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setColor(new Color(65, 215, 120));
-                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                g.setColor(new Color(130, 255, 170));
-                drawCentered(g, "✔ CURRENTLY WORN", btnX + btnW / 2, btnY + 18);
-            } else if (owned[i]) {
-                if (i < 3) {
-                    g.setColor(new Color(22, 38, 30));
-                    g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setColor(new Color(55, 130, 85));
-                    g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                    g.setColor(new Color(120, 215, 160));
-                    drawCentered(g, "✔ PERMANENT ACTIVE", btnX + btnW / 2, btnY + 18);
+                    g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                    g.setColor(new Color(195, 190, 205));
+                    g.drawString(desc, tx, card.y + 55);
+
+                    // Interactive Button Pill
+                    int btnX = tx;
+                    int btnY = card.y + 72;
+                    int btnW = 185;
+                    int btnH = 26;
+
+                    if (equipped) {
+                        g.setColor(new Color(25, 68, 38));
+                        g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setColor(new Color(65, 215, 120));
+                        g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                        g.setColor(new Color(130, 255, 170));
+                        drawCentered(g, "✔ ARMED (CLICK TO UNEQUIP)", btnX + btnW / 2, btnY + 17);
+                    } else if (owned) {
+                        g.setColor(hovered ? new Color(75, 62, 42) : new Color(52, 42, 28));
+                        g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setColor(new Color(235, 195, 105));
+                        g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                        g.setColor(new Color(255, 235, 170));
+                        drawCentered(g, "✦ EQUIP TO LOADOUT", btnX + btnW / 2, btnY + 17);
+                    } else {
+                        boolean canAfford = levelManager.getTotalRewards() >= cost;
+                        if (canAfford) {
+                            g.setColor(hovered ? new Color(130, 95, 30) : new Color(100, 72, 20));
+                            g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setColor(new Color(255, 215, 100));
+                            g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                            g.setColor(new Color(255, 245, 210));
+                            drawCentered(g, "💰 UNLOCK - " + cost + " CR", btnX + btnW / 2, btnY + 17);
+                        } else {
+                            g.setColor(new Color(28, 26, 32));
+                            g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setColor(new Color(70, 65, 75));
+                            g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                            g.setColor(new Color(145, 140, 150));
+                            drawCentered(g, "🔒 NEED " + cost + " CR", btnX + btnW / 2, btnY + 17);
+                        }
+                    }
                 } else {
-                    g.setColor(hovered ? new Color(85, 68, 45) : new Color(60, 48, 32));
+                    // Card 5: Operative Satchel Status Summary
+                    g.setColor(new Color(24, 26, 35));
+                    g.fillRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+                    g.setColor(new Color(180, 140, 75));
+                    g.drawRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+
+                    int ibx = card.x + 10, iby = card.y + 10, ibw = 80, ibh = 92;
+                    g.setColor(new Color(16, 14, 20));
+                    g.fillRoundRect(ibx, iby, ibw, ibh, 6, 6);
+                    g.setColor(new Color(60, 50, 45));
+                    g.drawRoundRect(ibx, iby, ibw, ibh, 6, 6);
+                    drawGadgetIcon(g, 5, ibx + ibw / 2, iby + ibh / 2, 48);
+
+                    int tx = card.x + 100;
+                    g.setFont(new Font("Monospaced", Font.BOLD, 13));
+                    g.setColor(new Color(255, 225, 155));
+                    g.drawString("HEIST LOADOUT ARSENAL", tx, card.y + 24);
+
+                    g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                    g.setColor(new Color(245, 185, 90));
+                    g.drawString("[INFILTRATION GEAR]", tx, card.y + 38);
+
+                    g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                    g.setColor(new Color(195, 190, 205));
+                    g.drawString("Armed: " + levelManager.getEquippedCount() + "/2 tactical items equipped.", tx, card.y + 55);
+
+                    int btnX = tx;
+                    int btnY = card.y + 72;
+                    int btnW = 185;
+                    int btnH = 26;
+                    g.setColor(new Color(20, 52, 32));
                     g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setColor(new Color(235, 195, 105));
+                    g.setColor(new Color(65, 215, 120));
                     g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                    g.setColor(new Color(255, 235, 170));
-                    drawCentered(g, "✦ EQUIP DISGUISE", btnX + btnW / 2, btnY + 18);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                    g.setColor(new Color(130, 255, 170));
+                    drawCentered(g, "✔ LOADOUT READY FOR HEIST", btnX + btnW / 2, btnY + 17);
                 }
-            } else {
-                boolean canAfford = levelManager.getTotalRewards() >= costs[i];
-                if (canAfford) {
-                    g.setColor(hovered ? new Color(130, 95, 30) : new Color(100, 72, 20));
-                    g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setColor(new Color(255, 215, 100));
-                    g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                    g.setColor(new Color(255, 245, 210));
-                    drawCentered(g, "💰 UNLOCK - " + costs[i] + " CR", btnX + btnW / 2, btnY + 18);
+            }
+        } else {
+            // --- THIEF CLOAKS ATELIER TAB ---
+            String[] names = {
+                LevelManager.OUTFIT_NAMES[0].toUpperCase(),
+                LevelManager.OUTFIT_NAMES[1].toUpperCase(),
+                LevelManager.OUTFIT_NAMES[2].toUpperCase(),
+                LevelManager.OUTFIT_NAMES[3].toUpperCase(),
+                "SYNDICATE MIRROR", "FENCE DISPATCH"
+            };
+            String[] descs = {
+                "Standard issue dark wool infiltrator suit",
+                "Velvet ruby cloak tailored for midnight heists",
+                "Specialist jade weave woven for ghost runs",
+                "Gold embroidered trophy coat for master thieves",
+                "Operative disguise vanity preview station",
+                "Black market contacts across 5 continental galleries"
+            };
+            int[] costs = {
+                0,
+                LevelManager.OUTFIT_COSTS[1],
+                LevelManager.OUTFIT_COSTS[2],
+                LevelManager.OUTFIT_COSTS[3],
+                0, 0
+            };
+            boolean[] owned = {
+                true,
+                levelManager.isOutfitUnlocked(1),
+                levelManager.isOutfitUnlocked(2),
+                levelManager.isOutfitUnlocked(3),
+                true, true
+            };
+
+            for (int i = 0; i < 6; i++) {
+                Rectangle card = shopItemBounds(i);
+                boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
+                boolean equipped = i < 4 && levelManager.getSelectedOutfit() == i;
+
+                g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
+                g.fillRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+                g.setColor(equipped ? new Color(245, 215, 120) : hovered ? GOLD : owned[i] ? new Color(110, 160, 120) : new Color(90, 75, 65));
+                g.drawRoundRect(card.x, card.y, card.width, card.height, 10, 10);
+
+                // Left icon / showcase box
+                int ibx = card.x + 10, iby = card.y + 10, ibw = 80, ibh = 92;
+                g.setColor(new Color(16, 14, 20));
+                g.fillRoundRect(ibx, iby, ibw, ibh, 6, 6);
+                g.setColor(new Color(60, 50, 45));
+                g.drawRoundRect(ibx, iby, ibw, ibh, 6, 6);
+
+                if (i < 4) {
+                    drawDisguiseMannequin(g, i, ibx + ibw / 2, iby + ibh / 2 + 10);
                 } else {
-                    g.setColor(new Color(28, 26, 32));
+                    drawGadgetIcon(g, i == 4 ? 4 : 5, ibx + ibw / 2, iby + ibh / 2, 48);
+                }
+
+                // Right content
+                int tx = card.x + 100;
+                g.setFont(new Font("Monospaced", Font.BOLD, 13));
+                g.setColor(new Color(255, 225, 155));
+                g.drawString(names[i], tx, card.y + 24);
+
+                g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                g.setColor(i < 4 ? new Color(245, 175, 80) : new Color(110, 230, 180));
+                g.drawString(i < 4 ? "[THIEF DISGUISE]" : "[SPECIAL FACILITY]", tx, card.y + 38);
+
+                g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                g.setColor(new Color(195, 190, 205));
+                g.drawString(descs[i], tx, card.y + 55);
+
+                // Interactive Button Pill
+                int btnX = tx;
+                int btnY = card.y + 72;
+                int btnW = 185;
+                int btnH = 26;
+
+                if (i < 4) {
+                    if (equipped) {
+                        g.setColor(new Color(25, 65, 38));
+                        g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setColor(new Color(65, 215, 120));
+                        g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                        g.setColor(new Color(130, 255, 170));
+                        drawCentered(g, "✔ CURRENTLY WORN", btnX + btnW / 2, btnY + 17);
+                    } else if (owned[i]) {
+                        g.setColor(hovered ? new Color(85, 68, 45) : new Color(60, 48, 32));
+                        g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setColor(new Color(235, 195, 105));
+                        g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                        g.setColor(new Color(255, 235, 170));
+                        drawCentered(g, "✦ EQUIP DISGUISE", btnX + btnW / 2, btnY + 17);
+                    } else {
+                        boolean canAfford = levelManager.getTotalRewards() >= costs[i];
+                        if (canAfford) {
+                            g.setColor(hovered ? new Color(130, 95, 30) : new Color(100, 72, 20));
+                            g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setColor(new Color(255, 215, 100));
+                            g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                            g.setColor(new Color(255, 245, 210));
+                            drawCentered(g, "💰 UNLOCK - " + costs[i] + " CR", btnX + btnW / 2, btnY + 17);
+                        } else {
+                            g.setColor(new Color(28, 26, 32));
+                            g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setColor(new Color(70, 65, 75));
+                            g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
+                            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                            g.setColor(new Color(145, 140, 150));
+                            drawCentered(g, "🔒 NEED " + costs[i] + " CR", btnX + btnW / 2, btnY + 17);
+                        }
+                    }
+                } else {
+                    g.setColor(new Color(22, 28, 38));
                     g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setColor(new Color(70, 65, 75));
+                    g.setColor(new Color(65, 95, 135));
                     g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                    g.setColor(new Color(145, 140, 150));
-                    drawCentered(g, "🔒 NEED " + costs[i] + " CR", btnX + btnW / 2, btnY + 18);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                    g.setColor(new Color(175, 205, 245));
+                    drawCentered(g, "✦ SYNDICATE PERK", btnX + btnW / 2, btnY + 17);
                 }
             }
         }
@@ -2971,36 +3387,24 @@ public class GamePanel extends JPanel {
         g.drawRoundRect(cx + 2, cy + 2, cw - 4, ch - 4, 6, 6);
 
         // Panel 1: Accuracy Gauge (Left, w = 220)
-        int p1x = cx + 18, p1y = cy + 16;
+        int p1x = cx + 18, p1y = cy + 12;
         g.setFont(new Font("Monospaced", Font.BOLD, 10));
         g.setColor(new Color(210, 175, 100));
-        drawCentered(g, "REPLICATION ACCURACY", p1x + 100, p1y + 14);
+        drawCentered(g, "REPLICATION ACCURACY", p1x + 100, p1y + 12);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 36));
+        g.setFont(new Font("Monospaced", Font.BOLD, 30));
         Color accColor = quality >= 80 ? new Color(110, 235, 150)
             : quality >= 60 ? new Color(245, 205, 90) : new Color(240, 90, 80);
         g.setColor(accColor);
-        drawCentered(g, quality + "%", p1x + 100, p1y + 54);
+        drawCentered(g, quality + "%", p1x + 100, p1y + 42);
 
-        // Accuracy status pill
-        int pillW = 180, pillH = 22;
-        int pillX = p1x + 10;
-        int pillY = p1y + 68;
-        g.setColor(quality >= 80 ? new Color(22, 60, 35) : quality >= 60 ? new Color(60, 48, 22) : new Color(60, 24, 24));
-        g.fillRoundRect(pillX, pillY, pillW, pillH, 5, 5);
-        g.setColor(accColor);
-        g.drawRoundRect(pillX, pillY, pillW, pillH, 5, 5);
-        g.setFont(new Font("Monospaced", Font.BOLD, 9));
-        String statusPill = quality >= 80 ? "★ FLAWLESS MASTERWORK" : quality >= 60 ? "PASSABLE COUNTERFEIT" : "FLAWED COUNTERFEIT";
-        drawCentered(g, statusPill, pillX + pillW / 2, pillY + 15);
+        int colorScore = stolen != null && stolen.getBreakdown() != null ? stolen.getBreakdown().getColorScore() : quality;
+        int shapeScore = stolen != null && stolen.getBreakdown() != null ? stolen.getBreakdown().getShapeScore() : quality;
+        int posScore = stolen != null && stolen.getBreakdown() != null ? stolen.getBreakdown().getPositionScore() : quality;
 
-        // Mini progress bar below pill
-        g.setColor(new Color(18, 16, 24));
-        g.fillRect(pillX, pillY + 28, pillW, 6);
-        g.setColor(accColor);
-        g.fillRect(pillX, pillY + 28, (int) (pillW * (quality / 100.0)), 6);
-        g.setColor(new Color(80, 65, 45));
-        g.drawRect(pillX, pillY + 28, pillW, 6);
+        drawMiniPillarBar(g, "COLOR 35%", colorScore, p1x + 10, p1y + 54, 180);
+        drawMiniPillarBar(g, "SHAPE 35%", shapeScore, p1x + 10, p1y + 80, 180);
+        drawMiniPillarBar(g, "ALIGN 30%", posScore, p1x + 10, p1y + 106, 180);
 
         // Panel 2: Curator's Verdict (Center, w = 360)
         int p2x = cx + 240, p2y = cy + 16;
@@ -3155,7 +3559,7 @@ public class GamePanel extends JPanel {
         int dosX = nx + 245;
         int dosY = ny + 115;
         int dosW = 295;
-        int dosH = 195;
+        int dosH = 205;
 
         g.setColor(new Color(236, 230, 216));
         g.fillRoundRect(dosX, dosY, dosW, dosH, 6, 6);
@@ -3164,50 +3568,107 @@ public class GamePanel extends JPanel {
 
         // 3 Gold Stars with 3D drop shadow
         int stars = lastResult == null ? 0 : lastResult.getStars();
-        g.setFont(new Font("Monospaced", Font.BOLD, 26));
+        g.setFont(new Font("Monospaced", Font.BOLD, 24));
         g.setColor(new Color(60, 45, 20, 80));
-        drawCentered(g, starString(stars), dosX + dosW / 2 + 1, dosY + 31);
+        drawCentered(g, starString(stars), dosX + dosW / 2 + 1, dosY + 26);
         g.setColor(new Color(218, 165, 32));
-        drawCentered(g, starString(stars), dosX + dosW / 2, dosY + 30);
+        drawCentered(g, starString(stars), dosX + dosW / 2, dosY + 25);
+
+        // Star criteria legend
+        g.setFont(new Font("Monospaced", Font.PLAIN, 8));
+        g.setColor(new Color(110, 95, 80));
+        String starCriteria = stars == 3 ? "★★★ FLAWLESS GHOST HEIST (MAX RATING)"
+            : stars == 2 ? "★★ EXCELLENT FORGERY (CLEARED ≥70%)" : "★ HEIST COMPLETED (CLEARED)";
+        drawCentered(g, starCriteria, dosX + dosW / 2, dosY + 38);
 
         // Ledger breakdown
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
         g.setColor(new Color(35, 30, 25));
-        drawCentered(g, "BLACK-MARKET FENCE LEDGER", dosX + dosW / 2, dosY + 56);
+        drawCentered(g, "BLACK-MARKET FENCE LEDGER", dosX + dosW / 2, dosY + 54);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
         g.setColor(new Color(55, 48, 42));
-        int rowY = dosY + 80;
-        int scoreVal = lastResult == null ? 0 : lastResult.getScore();
-        int rewardVal = lastResult == null ? 0 : lastResult.getReward();
-        int timeVal = lastResult == null ? 0 : lastResult.getTimeRemaining();
-        int alertVal = lastResult == null ? 0 : lastResult.getDetectionIncidents();
+        int rowY = dosY + 70;
+        int stolenCount = lastResult != null ? lastResult.getPaintingsStolen() : 1;
+        int targetCount = lastResult != null ? lastResult.getTargetPaintings() : 1;
+        int avgAcc = lastResult != null ? lastResult.getAverageAccuracy() : 85;
+        int colorAcc = lastResult != null ? lastResult.getColorAccuracy() : avgAcc;
+        int shapeAcc = lastResult != null ? lastResult.getShapeAccuracy() : avgAcc;
+        int posAcc = lastResult != null ? lastResult.getPositionAccuracy() : avgAcc;
+        int alertVal = lastResult != null ? lastResult.getDetectionIncidents() : 0;
+        int timeVal = lastResult != null ? lastResult.getTimeRemaining() : 60;
+        int elapsedVal = lastResult != null ? lastResult.getElapsedSeconds() : 45;
 
-        g.drawString("STEALTH SCORE", dosX + 18, rowY);
-        g.drawString(String.format("%,d", scoreVal), dosX + dosW - 65, rowY);
-        rowY += 20;
+        g.drawString("EXHIBITS SECURED", dosX + 14, rowY);
+        g.drawString(stolenCount + "/" + targetCount + " SWAPPED", dosX + dosW - 95, rowY);
+        rowY += 17;
 
-        g.drawString("HEIST REWARD", dosX + 18, rowY);
-        g.setColor(new Color(38, 145, 75));
+        g.drawString("FORGERY MATCH", dosX + 14, rowY);
+        g.setColor(avgAcc >= 85 ? new Color(25, 120, 50) : avgAcc >= 70 ? new Color(160, 110, 20) : new Color(160, 40, 30));
+        g.drawString(avgAcc + "% [C:" + colorAcc + " S:" + shapeAcc + " P:" + posAcc + "]", dosX + dosW - 130, rowY);
+        rowY += 17;
+
+        g.setColor(new Color(55, 48, 42));
+        g.drawString("STEALTH STATUS", dosX + 14, rowY);
+        if (alertVal == 0) {
+            g.setColor(new Color(25, 120, 50));
+            g.drawString("GHOST (0 ALERTS)", dosX + dosW - 110, rowY);
+        } else {
+            g.setColor(new Color(160, 50, 40));
+            g.drawString(alertVal + " DETECTION(S)", dosX + dosW - 105, rowY);
+        }
+        rowY += 17;
+
+        g.setColor(new Color(55, 48, 42));
+        g.drawString("TIME ELAPSED", dosX + 14, rowY);
+        g.drawString(elapsedVal + "s (" + timeVal + "s left)", dosX + dosW - 115, rowY);
+        rowY += 17;
+
+        g.drawString("BONUS BREAKDOWN", dosX + 14, rowY);
+        int baseR = lastResult != null ? lastResult.getBaseReward() : 15;
+        int accR = lastResult != null ? lastResult.getAccuracyBonus() : 15;
+        int stR = lastResult != null ? lastResult.getStealthBonus() : 15;
+        int tmR = lastResult != null ? lastResult.getTimeBonus() : 5;
+        g.setColor(new Color(30, 100, 50));
+        g.drawString("+" + baseR + "B +" + accR + "A +" + stR + "S +" + tmR + "T", dosX + dosW - 125, rowY);
+        rowY += 18;
+
+        g.setColor(new Color(35, 30, 25));
+        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.drawString("TOTAL CREDITS", dosX + 14, rowY);
+        int rewardVal = lastResult != null ? lastResult.getReward() : 50;
+        g.setColor(new Color(22, 120, 48));
         g.drawString("+" + rewardVal + " CREDITS", dosX + dosW - 105, rowY);
-        rowY += 20;
-
-        g.setColor(new Color(55, 48, 42));
-        g.drawString("TIME REMAINING", dosX + 18, rowY);
-        g.drawString(timeVal + "s", dosX + dosW - 65, rowY);
-        rowY += 20;
-
-        g.drawString("GUARDS ALERTED", dosX + 18, rowY);
-        g.drawString(String.valueOf(alertVal), dosX + dosW - 65, rowY);
 
         // Stamped Wax Appraisal Seal on Newspaper
-        drawWaxAppraisalSeal(g, photoX + photoW - 14, photoY + photoH - 12, 90);
+        int sealAcc = lastResult != null ? lastResult.getAverageAccuracy() : 85;
+        drawWaxAppraisalSeal(g, photoX + photoW - 14, photoY + photoH - 12, sealAcc);
 
         // Action Buttons
         String nextLabel = levelManager.isUnlocked(selectedLevel + 1) ? "NEXT MUSEUM" : "REPLAY HEIST";
         drawButton(g, nextLabel, 390, VICTORY_NEXT_Y, true);
         drawButton(g, "REPLAY HEIST", 390, VICTORY_REPLAY_Y, false);
         drawButton(g, "LEVEL SELECT", 390, VICTORY_SELECT_Y, false);
+    }
+
+    private void drawMiniPillarBar(Graphics2D g, String label, int score, int x, int y, int w) {
+        g.setFont(new Font("Monospaced", Font.BOLD, 8));
+        g.setColor(new Color(185, 180, 195));
+        g.drawString(label, x, y + 8);
+        g.setColor(new Color(245, 225, 150));
+        String scStr = score + "%";
+        int sw = g.getFontMetrics().stringWidth(scStr);
+        g.drawString(scStr, x + w - sw, y + 8);
+
+        int barY = y + 10;
+        int barH = 5;
+        g.setColor(new Color(18, 16, 24));
+        g.fillRect(x, barY, w, barH);
+        Color fillC = score >= 80 ? new Color(110, 235, 150) : score >= 60 ? new Color(245, 205, 90) : new Color(240, 90, 80);
+        g.setColor(fillC);
+        g.fillRect(x, barY, (int) (w * (Math.max(0, Math.min(100, score)) / 100.0)), barH);
+        g.setColor(new Color(60, 50, 42));
+        g.drawRect(x, barY, w, barH);
     }
 
     private static String starString(int stars) {
@@ -3567,25 +4028,45 @@ public class GamePanel extends JPanel {
     }
 
     private Rectangle getForgeryUndoButtonBounds() {
-        return new Rectangle(532, 346, 78, 30);
+        return new Rectangle(528, 344, 55, 28);
+    }
+
+    private Rectangle getForgeryRedoButtonBounds() {
+        return new Rectangle(587, 344, 55, 28);
     }
 
     private Rectangle getForgeryClearButtonBounds() {
-        return new Rectangle(618, 346, 78, 30);
+        return new Rectangle(646, 344, 55, 28);
+    }
+
+    private Rectangle getForgeryZoomButtonBounds() {
+        return new Rectangle(705, 344, 55, 28);
     }
 
     private Rectangle getForgeryBrushButtonBounds() {
-        return new Rectangle(704, 346, 84, 30);
+        return new Rectangle(764, 344, 58, 28);
     }
 
     private Rectangle getForgeryFillButtonBounds() {
-        return new Rectangle(796, 346, 82, 30);
+        return new Rectangle(826, 344, 54, 28);
+    }
+
+    private Rectangle getForgeryMixButtonBounds() {
+        return new Rectangle(528, 378, 55, 28);
+    }
+
+    private Rectangle getForgeryTintButtonBounds() {
+        return new Rectangle(587, 378, 55, 28);
+    }
+
+    private Rectangle getForgeryShadeButtonBounds() {
+        return new Rectangle(646, 378, 55, 28);
     }
 
     private Rectangle getBrushSizeBounds(int sizeIndex) {
-        int[] widths = {54, 54, 54, 68};
-        int[] xs = {628, 688, 748, 808};
-        return new Rectangle(xs[sizeIndex], 380, widths[sizeIndex], 30);
+        int[] widths = {38, 38, 40, 44};
+        int[] xs = {708, 750, 792, 836};
+        return new Rectangle(xs[sizeIndex], 378, widths[sizeIndex], 28);
     }
 
     private Rectangle getPaletteSwatchBounds(int index) {
@@ -3606,9 +4087,14 @@ public class GamePanel extends JPanel {
         if (getForgeryReplaceButtonBounds().contains(x, y)) return true;
         if (getForgeryCancelButtonBounds().contains(x, y)) return true;
         if (getForgeryUndoButtonBounds().contains(x, y)) return true;
+        if (getForgeryRedoButtonBounds().contains(x, y)) return true;
         if (getForgeryClearButtonBounds().contains(x, y)) return true;
+        if (getForgeryZoomButtonBounds().contains(x, y)) return true;
         if (getForgeryBrushButtonBounds().contains(x, y)) return true;
         if (getForgeryFillButtonBounds().contains(x, y)) return true;
+        if (getForgeryMixButtonBounds().contains(x, y)) return true;
+        if (getForgeryTintButtonBounds().contains(x, y)) return true;
+        if (getForgeryShadeButtonBounds().contains(x, y)) return true;
         for (int i = 0; i < 4; i++) {
             if (getBrushSizeBounds(i).contains(x, y)) return true;
         }
@@ -3657,12 +4143,15 @@ public class GamePanel extends JPanel {
         cg.dispose();
 
         forgeryUndoList.clear();
+        forgeryRedoList.clear();
         forgeryUndoList.add(cloneCanvas(forgeryCanvas));
 
         Color[] pal = painting.getPalette();
         this.forgerySelectedColor = (pal != null && pal.length > 0) ? pal[0] : Color.BLACK;
+        this.forgeryPreviousColor = Color.WHITE;
         this.forgeryBrushSize = 7;
         this.forgeryFillMode = false;
+        this.forgeryZoomed = false;
         this.forgeryIsDrawing = false;
         this.forgeryLastDrawPoint = null;
 
@@ -3674,9 +4163,7 @@ public class GamePanel extends JPanel {
         }
         this.forgeryMaxTime = baseTime;
         this.forgeryTimeRemaining = baseTime;
-        this.forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
-            painting.getOriginalImage(), forgeryCanvas, painting.getPalette()
-        );
+        updateForgeryEvaluation();
 
         this.screen = Screen.FORGERY;
         pressedKeys.clear();
@@ -3693,19 +4180,28 @@ public class GamePanel extends JPanel {
         }
     }
 
+    private void updateForgeryEvaluation() {
+        if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null && forgeryCanvas != null) {
+            forgeryBreakdownPreview = ForgeryEvaluator.evaluateBreakdown(
+                forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
+            );
+            forgeryAccuracyPreview = forgeryBreakdownPreview.getOverallScore();
+        }
+    }
+
     private void finishForgery() {
         if (forgeryPainting == null || forgeryCanvas == null) {
             screen = Screen.PLAYING;
             return;
         }
-        int accuracy = ForgeryEvaluator.evaluateAccuracy(
-            forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
-        );
-        world.applyCompletedForgery(forgeryPainting, forgeryCanvas, accuracy);
+        updateForgeryEvaluation();
+        int accuracy = forgeryAccuracyPreview;
+        world.applyCompletedForgery(forgeryPainting, forgeryCanvas, accuracy, forgeryBreakdownPreview);
         screen = Screen.PLAYING;
         forgeryPainting = null;
         forgeryCanvas = null;
         forgeryUndoList.clear();
+        forgeryRedoList.clear();
         updateCursor();
         repaint();
     }
@@ -3715,6 +4211,7 @@ public class GamePanel extends JPanel {
         forgeryPainting = null;
         forgeryCanvas = null;
         forgeryUndoList.clear();
+        forgeryRedoList.clear();
         updateCursor();
         SoundEffects.play(SoundEffects.Cue.CLICK);
         repaint();
@@ -3722,14 +4219,22 @@ public class GamePanel extends JPanel {
 
     private void undoForgeryStroke() {
         if (forgeryUndoList.size() > 1) {
-            forgeryUndoList.remove(forgeryUndoList.size() - 1);
+            BufferedImage current = forgeryUndoList.remove(forgeryUndoList.size() - 1);
+            forgeryRedoList.add(current);
             BufferedImage prev = forgeryUndoList.get(forgeryUndoList.size() - 1);
             forgeryCanvas = cloneCanvas(prev);
-            if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
-                forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
-                    forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
-                );
-            }
+            updateForgeryEvaluation();
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+        }
+    }
+
+    private void redoForgeryStroke() {
+        if (!forgeryRedoList.isEmpty()) {
+            BufferedImage next = forgeryRedoList.remove(forgeryRedoList.size() - 1);
+            forgeryUndoList.add(cloneCanvas(next));
+            forgeryCanvas = cloneCanvas(next);
+            updateForgeryEvaluation();
             SoundEffects.play(SoundEffects.Cue.CLICK);
             repaint();
         }
@@ -3738,16 +4243,13 @@ public class GamePanel extends JPanel {
     private void clearForgeryCanvas() {
         if (forgeryCanvas == null) return;
         forgeryUndoList.add(cloneCanvas(forgeryCanvas));
-        if (forgeryUndoList.size() > 15) forgeryUndoList.remove(0);
+        if (forgeryUndoList.size() > 20) forgeryUndoList.remove(0);
+        forgeryRedoList.clear();
         Graphics2D cg = forgeryCanvas.createGraphics();
         cg.setColor(ForgeryEvaluator.BLANK_CANVAS_COLOR);
         cg.fillRect(0, 0, MasterpieceCatalog.CANVAS_WIDTH, MasterpieceCatalog.CANVAS_HEIGHT);
         cg.dispose();
-        if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
-            forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
-                forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
-            );
-        }
+        updateForgeryEvaluation();
         SoundEffects.play(SoundEffects.Cue.CLICK);
         repaint();
     }
@@ -3808,8 +4310,18 @@ public class GamePanel extends JPanel {
             undoForgeryStroke();
             return;
         }
+        if (getForgeryRedoButtonBounds().contains(x, y)) {
+            redoForgeryStroke();
+            return;
+        }
         if (getForgeryClearButtonBounds().contains(x, y)) {
             clearForgeryCanvas();
+            return;
+        }
+        if (getForgeryZoomButtonBounds().contains(x, y)) {
+            forgeryZoomed = !forgeryZoomed;
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
             return;
         }
         if (getForgeryBrushButtonBounds().contains(x, y)) {
@@ -3820,6 +4332,38 @@ public class GamePanel extends JPanel {
         }
         if (getForgeryFillButtonBounds().contains(x, y)) {
             forgeryFillMode = true;
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+            return;
+        }
+        if (getForgeryMixButtonBounds().contains(x, y)) {
+            if (forgeryPreviousColor != null) {
+                int mr = (forgerySelectedColor.getRed() + forgeryPreviousColor.getRed()) / 2;
+                int mg = (forgerySelectedColor.getGreen() + forgeryPreviousColor.getGreen()) / 2;
+                int mb = (forgerySelectedColor.getBlue() + forgeryPreviousColor.getBlue()) / 2;
+                forgeryPreviousColor = forgerySelectedColor;
+                forgerySelectedColor = new Color(mr, mg, mb);
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+            }
+            return;
+        }
+        if (getForgeryTintButtonBounds().contains(x, y)) {
+            int tr = Math.min(255, (int)(forgerySelectedColor.getRed() * 0.75 + 255 * 0.25));
+            int tg = Math.min(255, (int)(forgerySelectedColor.getGreen() * 0.75 + 255 * 0.25));
+            int tb = Math.min(255, (int)(forgerySelectedColor.getBlue() * 0.75 + 255 * 0.25));
+            forgeryPreviousColor = forgerySelectedColor;
+            forgerySelectedColor = new Color(tr, tg, tb);
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            repaint();
+            return;
+        }
+        if (getForgeryShadeButtonBounds().contains(x, y)) {
+            int sr = (int)(forgerySelectedColor.getRed() * 0.75);
+            int sg = (int)(forgerySelectedColor.getGreen() * 0.75);
+            int sb = (int)(forgerySelectedColor.getBlue() * 0.75);
+            forgeryPreviousColor = forgerySelectedColor;
+            forgerySelectedColor = new Color(sr, sg, sb);
             SoundEffects.play(SoundEffects.Cue.CLICK);
             repaint();
             return;
@@ -3836,6 +4380,7 @@ public class GamePanel extends JPanel {
         Color[] availableColors = getForgeryPaletteList();
         for (int i = 0; i < availableColors.length; i++) {
             if (getPaletteSwatchBounds(i).contains(x, y)) {
+                forgeryPreviousColor = forgerySelectedColor;
                 forgerySelectedColor = availableColors[i];
                 SoundEffects.play(SoundEffects.Cue.CLICK);
                 repaint();
@@ -3849,6 +4394,7 @@ public class GamePanel extends JPanel {
             ox = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_WIDTH - 1, ox));
             oy = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_HEIGHT - 1, oy));
             int rgb = forgeryPainting.getOriginalImage().getRGB(ox, oy);
+            forgeryPreviousColor = forgerySelectedColor;
             forgerySelectedColor = new Color(rgb, false);
             SoundEffects.play(SoundEffects.Cue.CLICK);
             repaint();
@@ -3856,21 +4402,29 @@ public class GamePanel extends JPanel {
         }
         // Draw or fill on forgery canvas
         if (getForgeryCanvasScreenBounds().contains(x, y) && forgeryCanvas != null) {
-            int cx = (x - FORGERY_CANVAS_X) * MasterpieceCatalog.CANVAS_WIDTH / FORGERY_CANVAS_W;
-            int cy = (y - FORGERY_CANVAS_Y) * MasterpieceCatalog.CANVAS_HEIGHT / FORGERY_CANVAS_H;
+            int cx, cy;
+            if (forgeryZoomed) {
+                int viewX = MasterpieceCatalog.CANVAS_WIDTH / 4;
+                int viewY = MasterpieceCatalog.CANVAS_HEIGHT / 4;
+                int viewW = MasterpieceCatalog.CANVAS_WIDTH / 2;
+                int viewH = MasterpieceCatalog.CANVAS_HEIGHT / 2;
+                cx = viewX + (x - FORGERY_CANVAS_X) * viewW / FORGERY_CANVAS_W;
+                cy = viewY + (y - FORGERY_CANVAS_Y) * viewH / FORGERY_CANVAS_H;
+            } else {
+                cx = (x - FORGERY_CANVAS_X) * MasterpieceCatalog.CANVAS_WIDTH / FORGERY_CANVAS_W;
+                cy = (y - FORGERY_CANVAS_Y) * MasterpieceCatalog.CANVAS_HEIGHT / FORGERY_CANVAS_H;
+            }
             cx = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_WIDTH - 1, cx));
             cy = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_HEIGHT - 1, cy));
 
             forgeryUndoList.add(cloneCanvas(forgeryCanvas));
-            if (forgeryUndoList.size() > 15) forgeryUndoList.remove(0);
+            if (forgeryUndoList.size() > 20) forgeryUndoList.remove(0);
+            forgeryRedoList.clear();
 
             if (forgeryFillMode) {
                 floodFill(forgeryCanvas, cx, cy, forgerySelectedColor);
-                if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null) {
-                    forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
-                        forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
-                    );
-                }
+                updateForgeryEvaluation();
+                SoundEffects.play(SoundEffects.Cue.CLICK);
                 repaint();
             } else {
                 forgeryIsDrawing = true;
@@ -3880,6 +4434,8 @@ public class GamePanel extends JPanel {
                 cg.setColor(forgerySelectedColor);
                 cg.fillOval(cx - forgeryBrushSize / 2, cy - forgeryBrushSize / 2, forgeryBrushSize, forgeryBrushSize);
                 cg.dispose();
+                SoundEffects.play(SoundEffects.Cue.BRUSH);
+                brushSoundCooldown = 0.14;
                 repaint();
             }
         }
@@ -3887,8 +4443,18 @@ public class GamePanel extends JPanel {
 
     private void handleForgeryMouseDrag(int x, int y) {
         if (!forgeryIsDrawing || forgeryCanvas == null || forgeryLastDrawPoint == null) return;
-        int cx = (x - FORGERY_CANVAS_X) * MasterpieceCatalog.CANVAS_WIDTH / FORGERY_CANVAS_W;
-        int cy = (y - FORGERY_CANVAS_Y) * MasterpieceCatalog.CANVAS_HEIGHT / FORGERY_CANVAS_H;
+        int cx, cy;
+        if (forgeryZoomed) {
+            int viewX = MasterpieceCatalog.CANVAS_WIDTH / 4;
+            int viewY = MasterpieceCatalog.CANVAS_HEIGHT / 4;
+            int viewW = MasterpieceCatalog.CANVAS_WIDTH / 2;
+            int viewH = MasterpieceCatalog.CANVAS_HEIGHT / 2;
+            cx = viewX + (x - FORGERY_CANVAS_X) * viewW / FORGERY_CANVAS_W;
+            cy = viewY + (y - FORGERY_CANVAS_Y) * viewH / FORGERY_CANVAS_H;
+        } else {
+            cx = (x - FORGERY_CANVAS_X) * MasterpieceCatalog.CANVAS_WIDTH / FORGERY_CANVAS_W;
+            cy = (y - FORGERY_CANVAS_Y) * MasterpieceCatalog.CANVAS_HEIGHT / FORGERY_CANVAS_H;
+        }
         cx = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_WIDTH - 1, cx));
         cy = Math.max(0, Math.min(MasterpieceCatalog.CANVAS_HEIGHT - 1, cy));
 
@@ -3900,6 +4466,11 @@ public class GamePanel extends JPanel {
         cg.fillOval(cx - forgeryBrushSize / 2, cy - forgeryBrushSize / 2, forgeryBrushSize, forgeryBrushSize);
         cg.dispose();
 
+        if (brushSoundCooldown <= 0) {
+            SoundEffects.play(SoundEffects.Cue.BRUSH);
+            brushSoundCooldown = 0.14;
+        }
+
         forgeryLastDrawPoint = new Point(cx, cy);
         repaint();
     }
@@ -3908,11 +4479,7 @@ public class GamePanel extends JPanel {
         if (forgeryIsDrawing) {
             forgeryIsDrawing = false;
             forgeryLastDrawPoint = null;
-            if (forgeryPainting != null && forgeryPainting.getOriginalImage() != null && forgeryCanvas != null) {
-                forgeryAccuracyPreview = ForgeryEvaluator.evaluateAccuracy(
-                    forgeryPainting.getOriginalImage(), forgeryCanvas, forgeryPainting.getPalette()
-                );
-            }
+            updateForgeryEvaluation();
             repaint();
         }
     }
@@ -4044,7 +4611,24 @@ public class GamePanel extends JPanel {
         g.setColor(new Color(110, 85, 55));
         g.drawRect(FORGERY_CANVAS_X - 2, FORGERY_CANVAS_Y - 1, FORGERY_CANVAS_W + 3, FORGERY_CANVAS_H + 1);
 
-        g.drawImage(forgeryCanvas, FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_W, FORGERY_CANVAS_H, null);
+        if (forgeryZoomed) {
+            int viewX = MasterpieceCatalog.CANVAS_WIDTH / 4;
+            int viewY = MasterpieceCatalog.CANVAS_HEIGHT / 4;
+            int viewW = MasterpieceCatalog.CANVAS_WIDTH / 2;
+            int viewH = MasterpieceCatalog.CANVAS_HEIGHT / 2;
+            g.drawImage(forgeryCanvas, FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_X + FORGERY_CANVAS_W, FORGERY_CANVAS_Y + FORGERY_CANVAS_H,
+                viewX, viewY, viewX + viewW, viewY + viewH, null);
+
+            // Zoom indicator badge
+            g.setColor(new Color(25, 20, 35, 220));
+            g.fillRoundRect(FORGERY_CANVAS_X + 6, FORGERY_CANVAS_Y + 6, 92, 16, 4, 4);
+            g.setColor(new Color(255, 215, 120));
+            g.drawRoundRect(FORGERY_CANVAS_X + 6, FORGERY_CANVAS_Y + 6, 92, 16, 4, 4);
+            g.setFont(new Font("Monospaced", Font.BOLD, 8));
+            drawCentered(g, "🔍 ZOOM 2X ACTIVE", FORGERY_CANVAS_X + 52, FORGERY_CANVAS_Y + 17);
+        } else {
+            g.drawImage(forgeryCanvas, FORGERY_CANVAS_X, FORGERY_CANVAS_Y, FORGERY_CANVAS_W, FORGERY_CANVAS_H, null);
+        }
 
         // 4 Canvas spring clips
         drawCanvasClip(g, FORGERY_CANVAS_X + 18, FORGERY_CANVAS_Y - 5);
@@ -4113,24 +4697,27 @@ public class GamePanel extends JPanel {
         }
 
         // --- TOOLS & BRUSHWORK (Bottom Right) ---
-        // Walnut tool tray backdrop
+        // Walnut tool tray backdrop (x=524, y=340, w=360, h=78)
         g.setColor(new Color(22, 14, 10, 240));
-        g.fillRoundRect(524, 340, 360, 76, 8, 8);
+        g.fillRoundRect(524, 340, 360, 78, 8, 8);
         g.setColor(new Color(145, 105, 55));
-        g.drawRoundRect(524, 340, 360, 76, 8, 8);
+        g.drawRoundRect(524, 340, 360, 78, 8, 8);
 
+        // Row 1: Actions
         drawStudioToolButton(g, getForgeryUndoButtonBounds(), "⟲ UNDO", false);
+        drawStudioToolButton(g, getForgeryRedoButtonBounds(), "↷ REDO", false);
         drawStudioToolButton(g, getForgeryClearButtonBounds(), "✕ CLEAR", false);
+        drawStudioToolButton(g, getForgeryZoomButtonBounds(), forgeryZoomed ? "🔍 2X" : "🔍 1X", forgeryZoomed);
         drawStudioToolButton(g, getForgeryBrushButtonBounds(), "✎ BRUSH", !forgeryFillMode);
         drawStudioToolButton(g, getForgeryFillButtonBounds(), "⯭ FILL", forgeryFillMode);
 
-        // Brush Sizes
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
-        g.setColor(new Color(225, 210, 180));
-        g.drawString("BRUSH SIZE:", 534, 399);
+        // Row 2: Color Mixing & Brush Sizes
+        drawStudioToolButton(g, getForgeryMixButtonBounds(), "🎨 MIX", false);
+        drawStudioToolButton(g, getForgeryTintButtonBounds(), "▲ TINT", false);
+        drawStudioToolButton(g, getForgeryShadeButtonBounds(), "▼ SHADE", false);
 
         int[] sizes = {3, 7, 14, 24};
-        String[] sizeLabels = {"3px", "7px", "14px", "24px"};
+        String[] sizeLabels = {"S", "M", "L", "XL"};
         for (int i = 0; i < sizes.length; i++) {
             Rectangle bsb = getBrushSizeBounds(i);
             boolean activeSize = (forgeryBrushSize == sizes[i]);
@@ -4188,19 +4775,16 @@ public class GamePanel extends JPanel {
         g.setColor(statusColor);
         String verdictTitle = (forgeryAccuracyPreview >= 80) ? "✔ AUTHENTIC MASTERPIECE"
             : (forgeryAccuracyPreview >= 60) ? "⚠ PASSABLE FORGERY" : "✖ FLAWED COUNTERFEIT";
-        g.drawString(verdictTitle, vX + 8, vY + 18);
+        g.drawString(verdictTitle, vX + 8, vY + 16);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
-        g.setColor(new Color(230, 225, 220));
-        String verdictDesc1 = (forgeryAccuracyPreview >= 80) ? "Guards inspect and pass calmly."
-            : (forgeryAccuracyPreview >= 60) ? "Minor flaws; alert risk if guard pauses."
-            : "Guards detect immediately and sound alarm!";
-        g.drawString(verdictDesc1, vX + 8, vY + 36);
+        // 3-Pillar Breakdown Bars
+        int colScore = forgeryBreakdownPreview != null ? forgeryBreakdownPreview.getColorScore() : 10;
+        int shpScore = forgeryBreakdownPreview != null ? forgeryBreakdownPreview.getShapeScore() : 10;
+        int posScore = forgeryBreakdownPreview != null ? forgeryBreakdownPreview.getPositionScore() : 10;
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 8));
-        g.setColor(new Color(175, 170, 165));
-        g.drawString("Thresholds: 60% Passable • 80% Flawless", vX + 8, vY + 54);
-        g.drawString("Guards inspect art along patrol paths", vX + 8, vY + 68);
+        drawPillarRow(g, "COLOR 35%", colScore, vX + 8, vY + 24, vW - 16);
+        drawPillarRow(g, "SHAPE 35%", shpScore, vX + 8, vY + 42, vW - 16);
+        drawPillarRow(g, "POS   30%", posScore, vX + 8, vY + 60, vW - 16);
 
         // --- HEIST BRIEFING & ACTION BUTTONS (Bottom Right: y = 428 to 566) ---
         int rightX = 524, rightY = 428, rightW = 360;
@@ -4223,6 +4807,28 @@ public class GamePanel extends JPanel {
         // Action Buttons
         drawCustomActionButton(g, getForgeryCancelButtonBounds(), "CANCEL", "ESC", false, new Color(90, 38, 38));
         drawCustomActionButton(g, getForgeryReplaceButtonBounds(), "SWAP & REPLACE", "ENTER", true, new Color(34, 120, 65));
+    }
+
+    private void drawPillarRow(Graphics2D g, String label, int score, int x, int y, int width) {
+        g.setFont(new Font("Monospaced", Font.BOLD, 8));
+        g.setColor(new Color(215, 205, 195));
+        g.drawString(label, x, y + 8);
+
+        int barX = x + 58;
+        int barW = width - 90;
+        int barH = 5;
+        g.setColor(new Color(15, 12, 18));
+        g.fillRoundRect(barX, y + 2, barW, barH, 2, 2);
+        g.setColor(new Color(60, 50, 40));
+        g.drawRoundRect(barX, y + 2, barW, barH, 2, 2);
+
+        int fillW = (int) (barW * Math.min(100, Math.max(0, score)) / 100.0);
+        Color barCol = score >= 80 ? new Color(46, 204, 113) : score >= 60 ? new Color(243, 156, 18) : new Color(231, 76, 60);
+        g.setColor(barCol);
+        g.fillRoundRect(barX, y + 2, fillW, barH, 2, 2);
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 8));
+        g.drawString(score + "%", barX + barW + 6, y + 8);
     }
 
     private void drawBrassBracket(Graphics2D g, int x, int y, boolean left, boolean top) {

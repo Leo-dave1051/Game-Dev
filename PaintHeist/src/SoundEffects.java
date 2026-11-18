@@ -20,7 +20,10 @@ public final class SoundEffects {
         SWITCH,
         ALERT,
         VICTORY,
-        BUSTED
+        BUSTED,
+        BRUSH,
+        FOOTSTEP,
+        SMOKE
     }
 
     private static final float SAMPLE_RATE = 22050f;
@@ -77,6 +80,9 @@ public final class SoundEffects {
             {523, 90, 0.20}, {659, 90, 0.20}, {784, 90, 0.22}, {1046, 180, 0.24}
         }));
         map.put(Cue.BUSTED, sequence(new double[][] {{310, 130, 0.22}, {220, 200, 0.22}}));
+        map.put(Cue.BRUSH, sequence(new double[][] {{260, 25, 0.08}, {340, 35, 0.10}}));
+        map.put(Cue.FOOTSTEP, sequence(new double[][] {{110, 20, 0.07}, {85, 25, 0.05}}));
+        map.put(Cue.SMOKE, sequence(new double[][] {{190, 60, 0.16}, {150, 90, 0.20}, {110, 120, 0.18}}));
         return map;
     }
 

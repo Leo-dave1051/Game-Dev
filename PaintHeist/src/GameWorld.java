@@ -51,6 +51,19 @@ public final class GameWorld {
     private String message = "";
     private double messageTimer;
 
+    // Tactical Equipment
+    private boolean hasSmokeBomb;
+    private int smokeBombsRemaining;
+    private double smokeActiveTimer;
+    private double smokeX;
+    private double smokeY;
+    private boolean hasSilentShoes;
+    private boolean hasLockpickKit;
+    private boolean hasQuickDrawBrush;
+    private boolean hasDistractionDevice;
+
+    private double footstepTimer;
+
     public GameWorld() {
         this(0);
     }
@@ -65,7 +78,7 @@ public final class GameWorld {
         playerY = start.y;
         for (MuseumLevel.GuardRoute route : level.getGuards()) {
             Point position = route.getStart();
-            guards.add(new Guard(route.getName(), position.x, position.y, route.getSpeed(),
+            guards.add(new Guard(route.getName(), route.getGuardType(), position.x, position.y, route.getSpeed(),
                 route.getWaypoints().toArray(new Point[0])));
         }
         for (MuseumLevel.CameraData data : level.getCameras()) {
@@ -180,10 +193,16 @@ public final class GameWorld {
             }
         }
 
+        smokeActiveTimer = Math.max(0, smokeActiveTimer - dt);
+        if (input.smokePressed && hidingIn == null) {
+            deploySmokeBomb();
+        }
+
+        boolean covered = hidingIn != null || isCoveredBySmoke();
         boolean cameraDetecting = false;
         for (SecurityCamera camera : cameras) {
             camera.update(dt, map, getPlayerCenterX(), getPlayerCenterY(),
-                hidingIn != null, map.areSecuritySystemsDisabled());
+                covered, map.areSecuritySystemsDisabled());
             cameraDetecting |= camera.isDetecting();
             if (camera.hasNewDetection()) {
                 detectionIncidents++;
@@ -215,16 +234,42 @@ public final class GameWorld {
 
         updateFakeDiscoveries(dt);
         int visibleGuards = 0;
+        boolean anyGuardInvestigating = false;
+        boolean anyGuardChasing = false;
+
         for (Guard guard : guards) {
             Guard.State previousState = guard.getState();
+            Guard.DetectionStage previousStage = guard.getDetectionStage();
             NoiseSystem.NoiseEvent noise = noiseSystem.loudestAt(guard.centerX(), guard.centerY());
-            guard.update(dt, map, playerX, playerY, hidingIn != null, sprinting,
+
+            guard.update(dt, map, playerX, playerY, covered, sprinting, sneaking,
                 noise != null, noise == null ? 0 : noise.getX(),
                 noise == null ? 0 : noise.getY(), noise == null ? 0 : noise.getRadius());
-            if (previousState != Guard.State.CHASE && guard.getState() == Guard.State.CHASE) {
+
+            if ((previousState != Guard.State.CHASE && guard.getState() == Guard.State.CHASE)
+                || (previousStage != Guard.DetectionStage.CHASE && guard.getDetectionStage() == Guard.DetectionStage.CHASE)) {
                 detectionIncidents++;
                 SoundEffects.play(SoundEffects.Cue.ALERT);
+                showMessage("INTRUDER DETECTED! Guards are chasing you!", 3.0);
+
+                // If guard is a supervisor or alert, coordinate nearby guards to converge
+                for (Guard other : guards) {
+                    if (other != guard && other.getState() != Guard.State.CHASE && other.getState() != Guard.State.INSPECTING_ART) {
+                        double d = Point.distance(guard.centerX(), guard.centerY(), other.centerX(), other.centerY());
+                        if (d <= 320) {
+                            other.setSearchTarget(playerX, playerY);
+                        }
+                    }
+                }
+            } else if (previousStage != Guard.DetectionStage.SUSPICIOUS && guard.getDetectionStage() == Guard.DetectionStage.SUSPICIOUS) {
+                SoundEffects.play(SoundEffects.Cue.CLICK);
             }
+
+            if (guard.getState() == Guard.State.CHASE) anyGuardChasing = true;
+            if (guard.getDetectionStage() == Guard.DetectionStage.INVESTIGATING || guard.getState() == Guard.State.INSPECT) {
+                anyGuardInvestigating = true;
+            }
+
             if (guard.isPlayerVisible()) visibleGuards++;
             if (hidingIn == null && playerBounds().intersects(
                 new Rectangle((int) guard.getX(), (int) guard.getY(), Guard.WIDTH, Guard.HEIGHT))) {
@@ -235,13 +280,15 @@ public final class GameWorld {
         }
         LaserBarrier activeLaser = map.getActiveLaserContact(playerBounds());
         if (activeLaser != null) triggerLaserAlarm(activeLaser);
-        if (visibleGuards > 0 || cameraDetecting) {
-            suspicion = Math.min(100, suspicion + dt * (sprinting ? 34 : 24));
+        if (anyGuardChasing || cameraDetecting) {
+            suspicion = Math.min(100, suspicion + dt * (sprinting ? 34 : 26));
             if (suspicion >= 100) {
                 gameOver = true;
                 endReason = "Security identified you and sealed the museum.";
                 SoundEffects.play(SoundEffects.Cue.BUSTED);
             }
+        } else if (anyGuardInvestigating || visibleGuards > 0) {
+            suspicion = Math.min(100, suspicion + dt * 10);
         } else {
             suspicion = Math.max(0, suspicion - dt * 5.5);
         }
@@ -269,8 +316,26 @@ public final class GameWorld {
         dy = dy / length * speed * dt;
         moveAxis(dx, 0);
         moveAxis(0, dy);
+
+        footstepTimer -= dt;
+        if (footstepTimer <= 0) {
+            if (sprinting) {
+                footstepTimer = 0.28;
+                SoundEffects.play(SoundEffects.Cue.FOOTSTEP);
+            } else if (!sneaking) {
+                footstepTimer = 0.44;
+                if (!hasSilentShoes) {
+                    SoundEffects.play(SoundEffects.Cue.FOOTSTEP);
+                }
+            } else {
+                footstepTimer = 0.60;
+            }
+        }
+
         if (sprinting && noiseCooldown <= 0) {
-            makeNoise(162, 0.82);
+            double rad = hasSilentShoes ? 68.0 : 162.0;
+            double str = hasSilentShoes ? 0.32 : 0.82;
+            makeNoise(rad, str);
             noiseCooldown = 0.45;
         }
     }
@@ -379,8 +444,12 @@ public final class GameWorld {
     }
 
     public void applyCompletedForgery(MuseumMap.Painting painting, java.awt.image.BufferedImage fake, int quality) {
+        applyCompletedForgery(painting, fake, quality, null);
+    }
+
+    public void applyCompletedForgery(MuseumMap.Painting painting, java.awt.image.BufferedImage fake, int quality, ForgeryEvaluator.EvaluationBreakdown breakdown) {
         if (painting == null) return;
-        painting.setFake(fake, quality);
+        painting.setFake(fake, quality, breakdown);
         painting.discoveryTime = Math.max(16.0, 36.0 - quality * 0.16);
         makeNoise(180, 0.75);
         SoundEffects.play(SoundEffects.Cue.SWAP);
@@ -401,13 +470,16 @@ public final class GameWorld {
                 if (guard.isInspectingArt() && guard.getInspectingPainting() == painting) {
                     if (guard.getInspectProgress() >= 1.0) {
                         painting.guardInspected = true;
-                        if (painting.getQuality() >= 80) {
+                        int passThreshold = (guard.getGuardType() == Guard.GuardType.CURATOR) ? 85 : 80;
+                        if (painting.getQuality() >= passThreshold) {
                             painting.guardAdmired = true;
-                            guard.setSpeechBubble("★ Magnificent! A true masterwork!", new java.awt.Color(70, 240, 130), 3.5);
+                            String praise = (guard.getGuardType() == Guard.GuardType.CURATOR)
+                                ? "★ Exceptional provenance and glaze!" : "★ Magnificent! A true masterwork!";
+                            guard.setSpeechBubble(praise, new java.awt.Color(70, 240, 130), 3.5);
                             guard.finishArtInspection(true);
-                            suspicion = Math.max(0, suspicion - 8);
+                            suspicion = Math.max(0, suspicion - 10);
                             SoundEffects.play(SoundEffects.Cue.CLICK);
-                            showMessage("Guard inspected '" + painting.getName() + "': Fooled by master forgery! Suspicion dropped.", 3.5);
+                            showMessage(guard.getName() + " inspected '" + painting.getName() + "': Fooled by master forgery! Suspicion dropped.", 3.5);
                         } else if (painting.getQuality() >= 60) {
                             painting.guardSuspected = true;
                             guard.setSpeechBubble("❓ Hmm... something looks odd here...", new java.awt.Color(255, 215, 80), 3.5);
@@ -512,6 +584,52 @@ public final class GameWorld {
         throwRange = longThrow ? 250.0 : 190.0;
         switchDisableSeconds = longSwitch ? 16.0 : 12.0;
     }
+
+    public void applyEquipmentLoadout(java.util.Set<String> equipped) {
+        if (equipped == null) return;
+        hasSmokeBomb = equipped.contains(LevelManager.EQUIP_SMOKE_BOMB);
+        smokeBombsRemaining = hasSmokeBomb ? 2 : 0;
+        hasDistractionDevice = equipped.contains(LevelManager.EQUIP_DISTRACTION_DEVICE)
+            || equipped.contains(LevelManager.UPGRADE_LONG_THROW);
+        hasLockpickKit = equipped.contains(LevelManager.EQUIP_LOCKPICK_KIT)
+            || equipped.contains(LevelManager.UPGRADE_LONG_SWITCH);
+        hasSilentShoes = equipped.contains(LevelManager.EQUIP_SILENT_SHOES);
+        hasQuickDrawBrush = equipped.contains(LevelManager.EQUIP_QUICK_DRAW_BRUSH)
+            || equipped.contains(LevelManager.UPGRADE_FAST_COPY);
+
+        throwRange = hasDistractionDevice ? 275.0 : 190.0;
+        switchDisableSeconds = hasLockpickKit ? 18.0 : 12.0;
+    }
+
+    public boolean deploySmokeBomb() {
+        if (!hasSmokeBomb || smokeBombsRemaining <= 0 || smokeActiveTimer > 0) {
+            if (hasSmokeBomb && smokeBombsRemaining <= 0) {
+                showMessage("No smoke bombs remaining in loadout.", 1.5);
+            }
+            return false;
+        }
+        smokeBombsRemaining--;
+        smokeActiveTimer = 6.5;
+        smokeX = getPlayerCenterX();
+        smokeY = getPlayerCenterY();
+        SoundEffects.play(SoundEffects.Cue.SMOKE);
+        showMessage("SMOKE SCREEN DEPLOYED! Sightlines obscured.", 2.5);
+        return true;
+    }
+
+    public boolean hasSmokeBomb() { return hasSmokeBomb; }
+    public int getSmokeBombsRemaining() { return smokeBombsRemaining; }
+    public boolean isSmokeActive() { return smokeActiveTimer > 0; }
+    public double getSmokeActiveTimer() { return smokeActiveTimer; }
+    public double getSmokeX() { return smokeX; }
+    public double getSmokeY() { return smokeY; }
+    public boolean isCoveredBySmoke() {
+        return smokeActiveTimer > 0 && Point.distance(getPlayerCenterX(), getPlayerCenterY(), smokeX, smokeY) <= 80;
+    }
+    public boolean hasSilentShoes() { return hasSilentShoes; }
+    public boolean hasLockpickKit() { return hasLockpickKit; }
+    public boolean hasQuickDrawBrush() { return hasQuickDrawBrush; }
+    public boolean hasDistractionDevice() { return hasDistractionDevice; }
 
     public int getCopyProgress() {
         return activePainting != null && !activePainting.isCopied() ? activePainting.getCopyProgress() : 0;
@@ -620,22 +738,27 @@ public final class GameWorld {
 
     public static final class Input {
         public final boolean up, down, left, right, sprint, sneak, interact, steal;
-        public final boolean interactPressed, stealPressed, distractPressed;
+        public final boolean interactPressed, stealPressed, distractPressed, smokePressed;
         public Input(boolean up, boolean down, boolean left, boolean right, boolean sprint, boolean interact, boolean steal) {
-            this(up, down, left, right, sprint, interact, steal, false, false, false);
+            this(up, down, left, right, sprint, interact, steal, false, false, false, false);
         }
         public Input(boolean up, boolean down, boolean left, boolean right, boolean sprint, boolean interact, boolean steal,
                      boolean interactPressed, boolean stealPressed) {
-            this(up, down, left, right, sprint, interact, steal, interactPressed, stealPressed, false);
+            this(up, down, left, right, sprint, interact, steal, interactPressed, stealPressed, false, false);
         }
         public Input(boolean up, boolean down, boolean left, boolean right, boolean sprint, boolean interact, boolean steal,
                      boolean interactPressed, boolean stealPressed, boolean distractPressed) {
             this(up, down, left, right, sprint, false, interact, steal,
-                interactPressed, stealPressed, distractPressed);
+                interactPressed, stealPressed, distractPressed, false);
         }
         public Input(boolean up, boolean down, boolean left, boolean right, boolean sprint, boolean sneak,
                      boolean interact, boolean steal, boolean interactPressed, boolean stealPressed,
                      boolean distractPressed) {
+            this(up, down, left, right, sprint, sneak, interact, steal, interactPressed, stealPressed, distractPressed, false);
+        }
+        public Input(boolean up, boolean down, boolean left, boolean right, boolean sprint, boolean sneak,
+                     boolean interact, boolean steal, boolean interactPressed, boolean stealPressed,
+                     boolean distractPressed, boolean smokePressed) {
             this.up = up;
             this.down = down;
             this.left = left;
@@ -647,6 +770,7 @@ public final class GameWorld {
             this.interactPressed = interactPressed;
             this.stealPressed = stealPressed;
             this.distractPressed = distractPressed;
+            this.smokePressed = smokePressed;
         }
     }
 }

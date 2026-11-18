@@ -653,6 +653,7 @@ public final class MuseumMap {
         private final BufferedImage originalImage;
         private final Color[] palette;
         private BufferedImage fakeImage;
+        private ForgeryEvaluator.EvaluationBreakdown breakdown;
         boolean copied;
         boolean stolen;
         boolean discovered;
@@ -689,11 +690,17 @@ public final class MuseumMap {
         public boolean isGuardAlarmed() { return guardAlarmed; }
         public int getCopyProgress() { return (int) Math.round(copyProgress); }
         public int getQuality() { return quality; }
+        public ForgeryEvaluator.EvaluationBreakdown getBreakdown() { return breakdown; }
         public Rectangle getBounds() { return new Rectangle(x - 3, y - 3, WIDTH + 6, HEIGHT + 6); }
 
         public void setFake(BufferedImage fake, int calculatedQuality) {
+            setFake(fake, calculatedQuality, null);
+        }
+
+        public void setFake(BufferedImage fake, int calculatedQuality, ForgeryEvaluator.EvaluationBreakdown breakdown) {
             this.fakeImage = fake;
             this.quality = calculatedQuality;
+            this.breakdown = breakdown;
             this.copied = true;
             this.stolen = true;
             this.copyProgress = 100.0;

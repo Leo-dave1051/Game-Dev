@@ -17,10 +17,43 @@ public final class LevelManager {
     public static final String UPGRADE_LONG_THROW = "longThrow";
     public static final String UPGRADE_LONG_SWITCH = "longSwitch";
 
+    public static final String EQUIP_SMOKE_BOMB = "smokeBomb";
+    public static final String EQUIP_DISTRACTION_DEVICE = "distractionDevice";
+    public static final String EQUIP_LOCKPICK_KIT = "lockpickKit";
+    public static final String EQUIP_SILENT_SHOES = "silentShoes";
+    public static final String EQUIP_QUICK_DRAW_BRUSH = "quickDrawBrush";
+
+    public static final String[] ALL_EQUIPMENT = {
+        EQUIP_SMOKE_BOMB,
+        EQUIP_DISTRACTION_DEVICE,
+        EQUIP_LOCKPICK_KIT,
+        EQUIP_SILENT_SHOES,
+        EQUIP_QUICK_DRAW_BRUSH
+    };
+    public static final String[] EQUIPMENT_NAMES = {
+        "Smoke Bomb",
+        "Distraction Device",
+        "Lockpick Kit",
+        "Silent Shoes",
+        "Quick-Draw Brush"
+    };
+    public static final String[] EQUIPMENT_DESCRIPTIONS = {
+        "Dense smoke cloud blinds guards & cameras for 7s [G/1]",
+        "Enhanced noisemaker: +35% throw distance & lure radius",
+        "Skeleton key: +50% laser/switch bypass offline time",
+        "Padded soles: halves footstep noise & sprint vibration",
+        "Sable hair brush: +35s canvas time in Studio & finer lines"
+    };
+    public static final int[] EQUIPMENT_COSTS = {
+        25, 20, 25, 30, 25
+    };
+    public static final int MAX_EQUIPPED = 2;
+
     private static final Path SAVE_FILE = Paths.get(System.getProperty("user.home"), ".paintheist-save.properties");
     private final int[] bestScores = new int[MuseumLevel.all().size()];
     private final int[] bestTimes = new int[MuseumLevel.all().size()];
     private final Set<String> ownedUpgrades = new HashSet<>();
+    private final Set<String> equippedItems = new HashSet<>();
     private int unlockedLevels = 1;
     private int totalRewards;
     private int unlockedOutfitsMask = 1;
@@ -84,8 +117,40 @@ public final class LevelManager {
         if (ownedUpgrades.contains(key) || totalRewards < cost) return false;
         totalRewards -= cost;
         ownedUpgrades.add(key);
+        // Auto-equip if slot is free
+        if (equippedItems.size() < MAX_EQUIPPED) {
+            equippedItems.add(key);
+        }
         save();
         return true;
+    }
+
+    public boolean isEquipped(String key) {
+        return equippedItems.contains(key);
+    }
+
+    public boolean toggleEquip(String key) {
+        if (!hasUpgrade(key)) return false;
+        if (equippedItems.contains(key)) {
+            equippedItems.remove(key);
+            save();
+            return true;
+        } else {
+            if (equippedItems.size() < MAX_EQUIPPED) {
+                equippedItems.add(key);
+                save();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public int getEquippedCount() {
+        return equippedItems.size();
+    }
+
+    public Set<String> getEquippedItems() {
+        return java.util.Collections.unmodifiableSet(equippedItems);
     }
 
     public boolean isLightingEnabled() {
@@ -105,20 +170,65 @@ public final class LevelManager {
         if (!world.isWon()) throw new IllegalArgumentException("Only a completed heist can be scored.");
         int level = world.getLevelIndex();
         int remaining = world.getTimeLeft();
-        int score = remaining * 15 + world.getStolenCount() * 400
+        int elapsed = world.getElapsedSeconds();
+
+        int totalQuality = 0;
+        int totalColor = 0;
+        int totalShape = 0;
+        int totalPosition = 0;
+        int stolenCount = 0;
+        if (world.getMap() != null) {
+            for (MuseumMap.Painting p : world.getMap().getPaintings()) {
+                if (p.isStolen()) {
+                    stolenCount++;
+                    totalQuality += p.getQuality();
+                    if (p.getBreakdown() != null) {
+                        totalColor += p.getBreakdown().getColorScore();
+                        totalShape += p.getBreakdown().getShapeScore();
+                        totalPosition += p.getBreakdown().getPositionScore();
+                    } else {
+                        totalColor += p.getQuality();
+                        totalShape += p.getQuality();
+                        totalPosition += p.getQuality();
+                    }
+                }
+            }
+        }
+        int avgQuality = stolenCount > 0 ? (int) Math.round((double) totalQuality / stolenCount) : 80;
+        int avgColor = stolenCount > 0 ? (int) Math.round((double) totalColor / stolenCount) : avgQuality;
+        int avgShape = stolenCount > 0 ? (int) Math.round((double) totalShape / stolenCount) : avgQuality;
+        int avgPosition = stolenCount > 0 ? (int) Math.round((double) totalPosition / stolenCount) : avgQuality;
+
+        // Three-star rating system:
+        // 1 Star: Successfully completed heist
+        // 2 Stars: Acceptable replica accuracy (>= 70%)
+        // 3 Stars: High accuracy (>= 85%) AND minimal detection (<= 1 incident)
+        int stars = 1;
+        if (avgQuality >= 70) stars = 2;
+        if (avgQuality >= 85 && world.getDetectionIncidents() <= 1) stars = 3;
+
+        // Rewards breakdown
+        int baseReward = 15;
+        int accuracyBonus = avgQuality >= 85 ? 15 : avgQuality >= 70 ? 8 : 0;
+        int stealthBonus = world.getDetectionIncidents() == 0 ? 15 : world.getDetectionIncidents() <= 1 ? 5 : 0;
+        int timeBonus = Math.max(0, remaining / 15);
+        int totalReward = baseReward + accuracyBonus + stealthBonus + timeBonus;
+
+        int score = remaining * 15 + stolenCount * 400
             + Math.max(0, 100 - world.getSuspicion()) * 5
-            + (world.getDetectionIncidents() == 0 ? 500 : 0);
-        int stars = score >= 3000 ? 3 : score >= 1800 ? 2 : 1;
-        int reward = score / 100;
+            + (world.getDetectionIncidents() == 0 ? 500 : 0)
+            + avgQuality * 10;
+
         if (score > bestScores[level]) bestScores[level] = score;
-        if (bestTimes[level] < 0 || world.getElapsedSeconds() < bestTimes[level]) {
-            bestTimes[level] = world.getElapsedSeconds();
+        if (bestTimes[level] < 0 || elapsed < bestTimes[level]) {
+            bestTimes[level] = elapsed;
         }
         unlockedLevels = Math.max(unlockedLevels, Math.min(bestScores.length, level + 2));
-        totalRewards += reward;
+        totalRewards += totalReward;
         save();
-        return new Result(score, stars, reward, remaining, world.getDetectionIncidents(),
-            world.getSuspicion(), world.getStolenCount());
+        return new Result(score, stars, totalReward, baseReward, accuracyBonus, stealthBonus, timeBonus,
+            remaining, elapsed, world.getDetectionIncidents(), world.getSuspicion(),
+            stolenCount, world.getTargetCount(), avgQuality, avgColor, avgShape, avgPosition);
     }
 
     private void load() {
@@ -136,10 +246,25 @@ public final class LevelManager {
             if ("true".equalsIgnoreCase(props.getProperty("muted", "false")) != SoundEffects.isMuted()) {
                 SoundEffects.toggleMute();
             }
-            for (String key : new String[] {UPGRADE_FAST_COPY, UPGRADE_LONG_THROW, UPGRADE_LONG_SWITCH}) {
+            for (String key : ALL_EQUIPMENT) {
                 if ("true".equalsIgnoreCase(props.getProperty("upgrade." + key, "false"))) {
                     ownedUpgrades.add(key);
                 }
+                if ("true".equalsIgnoreCase(props.getProperty("equipped." + key, "false"))) {
+                    if (equippedItems.size() < MAX_EQUIPPED) {
+                        equippedItems.add(key);
+                    }
+                }
+            }
+            // Backward compatibility with legacy upgrade keys
+            if ("true".equalsIgnoreCase(props.getProperty("upgrade.fastCopy", "false"))) {
+                ownedUpgrades.add(EQUIP_QUICK_DRAW_BRUSH);
+            }
+            if ("true".equalsIgnoreCase(props.getProperty("upgrade.longThrow", "false"))) {
+                ownedUpgrades.add(EQUIP_DISTRACTION_DEVICE);
+            }
+            if ("true".equalsIgnoreCase(props.getProperty("upgrade.longSwitch", "false"))) {
+                ownedUpgrades.add(EQUIP_LOCKPICK_KIT);
             }
             for (int i = 0; i < bestScores.length; i++) {
                 bestScores[i] = Math.max(0, parseInt(props.getProperty("bestScore." + i), 0));
@@ -158,8 +283,9 @@ public final class LevelManager {
         props.setProperty("selectedOutfit", Integer.toString(selectedOutfit));
         props.setProperty("lightingEnabled", Boolean.toString(lightingEnabled));
         props.setProperty("muted", Boolean.toString(SoundEffects.isMuted()));
-        for (String key : new String[] {UPGRADE_FAST_COPY, UPGRADE_LONG_THROW, UPGRADE_LONG_SWITCH}) {
+        for (String key : ALL_EQUIPMENT) {
             props.setProperty("upgrade." + key, Boolean.toString(ownedUpgrades.contains(key)));
+            props.setProperty("equipped." + key, Boolean.toString(equippedItems.contains(key)));
         }
         for (int i = 0; i < bestScores.length; i++) {
             props.setProperty("bestScore." + i, Integer.toString(bestScores[i]));
@@ -185,28 +311,61 @@ public final class LevelManager {
         private final int score;
         private final int stars;
         private final int reward;
+        private final int baseReward;
+        private final int accuracyBonus;
+        private final int stealthBonus;
+        private final int timeBonus;
         private final int timeRemaining;
+        private final int elapsedSeconds;
         private final int detectionIncidents;
         private final int suspicion;
         private final int paintingsStolen;
+        private final int targetPaintings;
+        private final int averageAccuracy;
+        private final int colorAccuracy;
+        private final int shapeAccuracy;
+        private final int positionAccuracy;
 
-        private Result(int score, int stars, int reward, int timeRemaining,
-                       int detectionIncidents, int suspicion, int paintingsStolen) {
+        private Result(int score, int stars, int reward, int baseReward, int accuracyBonus,
+                       int stealthBonus, int timeBonus, int timeRemaining, int elapsedSeconds,
+                       int detectionIncidents, int suspicion, int paintingsStolen,
+                       int targetPaintings, int averageAccuracy, int colorAccuracy,
+                       int shapeAccuracy, int positionAccuracy) {
             this.score = score;
             this.stars = stars;
             this.reward = reward;
+            this.baseReward = baseReward;
+            this.accuracyBonus = accuracyBonus;
+            this.stealthBonus = stealthBonus;
+            this.timeBonus = timeBonus;
             this.timeRemaining = timeRemaining;
+            this.elapsedSeconds = elapsedSeconds;
             this.detectionIncidents = detectionIncidents;
             this.suspicion = suspicion;
             this.paintingsStolen = paintingsStolen;
+            this.targetPaintings = targetPaintings;
+            this.averageAccuracy = averageAccuracy;
+            this.colorAccuracy = colorAccuracy;
+            this.shapeAccuracy = shapeAccuracy;
+            this.positionAccuracy = positionAccuracy;
         }
 
         public int getScore() { return score; }
         public int getStars() { return stars; }
         public int getReward() { return reward; }
+        public int getBaseReward() { return baseReward; }
+        public int getAccuracyBonus() { return accuracyBonus; }
+        public int getStealthBonus() { return stealthBonus; }
+        public int getTimeBonus() { return timeBonus; }
         public int getTimeRemaining() { return timeRemaining; }
+        public int getElapsedSeconds() { return elapsedSeconds; }
         public int getDetectionIncidents() { return detectionIncidents; }
         public int getSuspicion() { return suspicion; }
         public int getPaintingsStolen() { return paintingsStolen; }
+        public int getTargetPaintings() { return targetPaintings; }
+        public int getAverageAccuracy() { return averageAccuracy; }
+        public int getColorAccuracy() { return colorAccuracy; }
+        public int getShapeAccuracy() { return shapeAccuracy; }
+        public int getPositionAccuracy() { return positionAccuracy; }
     }
 }

@@ -108,9 +108,9 @@ public final class MuseumLevel {
             points(p(91, 110), p(437, 110), p(742, 110)),
             strings("The First Light", "Marble Garden", "Portrait in Blue"),
             routes(
-                route("West Wing", 196, 115, 75, p(196, 115), p(268, 115), p(268, 230), p(54, 230)),
-                route("East Wing", 780, 304, 70, p(780, 304), p(880, 304), p(880, 430), p(680, 430)),
-                route("Grand Hall", 430, 444, 68, p(430, 444), p(594, 444), p(594, 505), p(350, 505))
+                route("West Wing Guard", Guard.GuardType.REGULAR, 196, 115, 75, p(196, 115), p(268, 115), p(268, 230), p(54, 230)),
+                route("East Wing Guard", Guard.GuardType.REGULAR, 780, 304, 70, p(780, 304), p(880, 304), p(880, 430), p(680, 430)),
+                route("Grand Hall Supervisor", Guard.GuardType.SUPERVISOR, 430, 444, 72, p(430, 444), p(594, 444), p(594, 505), p(350, 505))
             ),
             hides(hide("West wardrobe", 220, 318, 46, 52), hide("Restoration cabinet", 674, 430, 46, 52),
                 hide("East locker", 868, 395, 44, 50))
@@ -134,10 +134,10 @@ public final class MuseumLevel {
             points(p(115, 110), p(371, 110), p(765, 110), p(545, 472)),
             strings("The Crown's Reflection", "Gilded Promise", "Queen at Dusk", "The Royal Seal"),
             routes(
-                route("West Sentinel", 180, 118, 78, p(180, 118), p(238, 118), p(238, 220), p(58, 220)),
-                route("Royal Guard", 740, 304, 78, p(740, 304), p(890, 304), p(890, 440), p(720, 440)),
-                route("Throne Room", 520, 440, 82, p(520, 440), p(635, 440), p(635, 500), p(490, 500)),
-                route("North Passage", 510, 118, 72, p(510, 118), p(640, 118), p(640, 220), p(480, 220))
+                route("West Sentinel", Guard.GuardType.ELITE, 180, 118, 80, p(180, 118), p(238, 118), p(238, 220), p(58, 220)),
+                route("Royal Guard", Guard.GuardType.REGULAR, 740, 304, 75, p(740, 304), p(890, 304), p(890, 440), p(720, 440)),
+                route("Throne Room Supervisor", Guard.GuardType.SUPERVISOR, 520, 440, 78, p(520, 440), p(635, 440), p(635, 500), p(490, 500)),
+                route("Curator Vance", Guard.GuardType.CURATOR, 510, 118, 70, p(510, 118), p(640, 118), p(640, 220), p(480, 220))
             ),
             hides(hide("Royal wardrobe", 205, 316, 44, 50), hide("Servants' cabinet", 726, 434, 44, 48))
         ));
@@ -161,10 +161,10 @@ public final class MuseumLevel {
             points(p(100, 108), p(353, 106), p(593, 108), p(829, 108), p(100, 430)),
             strings("Burial at Dawn", "The Bronze Oracle", "Amber Dynasty", "River of Kings", "Hidden Pharaoh"),
             routes(
-                route("Antiquities", 150, 112, 70, p(150, 112), p(195, 112), p(195, 214), p(55, 214)),
-                route("Pillar Hall", 535, 130, 72, p(535, 130), p(730, 130), p(730, 218), p(530, 218)),
-                route("Lower Gallery", 420, 510, 72, p(420, 510), p(570, 510), p(570, 442), p(330, 510)),
-                route("East Gallery", 795, 310, 75, p(795, 310), p(900, 310), p(900, 432), p(795, 432))
+                route("Antiquities Guard", Guard.GuardType.REGULAR, 150, 112, 70, p(150, 112), p(195, 112), p(195, 214), p(55, 214)),
+                route("Pillar Hall Elite", Guard.GuardType.ELITE, 535, 130, 78, p(535, 130), p(730, 130), p(730, 218), p(530, 218)),
+                route("Lower Gallery Supervisor", Guard.GuardType.SUPERVISOR, 420, 510, 74, p(420, 510), p(570, 510), p(570, 442), p(330, 510)),
+                route("East Sentinel", Guard.GuardType.ELITE, 795, 310, 78, p(795, 310), p(900, 310), p(900, 432), p(795, 432))
             ),
             hides(hide("Dig storeroom", 245, 441, 46, 52), hide("Artifact cabinet", 692, 438, 44, 52))
         ));
@@ -189,11 +189,11 @@ public final class MuseumLevel {
             points(p(95, 107), p(255, 107), p(449, 107), p(644, 107), p(838, 107)),
             strings("Signal in Silver", "New City", "After the Rain", "Glass Horizon", "The Last Original"),
             routes(
-                route("North Patrol", 120, 110, 78, p(120, 110), p(174, 110), p(174, 205), p(42, 205)),
-                route("Modern East", 810, 294, 82, p(810, 294), p(906, 294), p(906, 426), p(810, 426)),
-                route("Sculpture Hall", 300, 420, 80, p(300, 420), p(560, 420), p(560, 510), p(280, 510)),
-                route("Upper Security", 418, 282, 78, p(418, 282), p(556, 282), p(556, 320), p(418, 320)),
-                route("West Wing", 42, 315, 74, p(42, 315), p(170, 315), p(170, 410), p(42, 410))
+                route("North Elite", Guard.GuardType.ELITE, 120, 110, 80, p(120, 110), p(174, 110), p(174, 205), p(42, 205)),
+                route("Modern East Sentinel", Guard.GuardType.ELITE, 810, 294, 82, p(810, 294), p(906, 294), p(906, 426), p(810, 426)),
+                route("Sculpture Hall Supervisor", Guard.GuardType.SUPERVISOR, 300, 420, 80, p(300, 420), p(560, 420), p(560, 510), p(280, 510)),
+                route("Upper Security Elite", Guard.GuardType.ELITE, 418, 282, 80, p(418, 282), p(556, 282), p(556, 320), p(418, 320)),
+                route("West Wing Guard", Guard.GuardType.REGULAR, 42, 315, 74, p(42, 315), p(170, 315), p(170, 410), p(42, 410))
             ),
             hides(hide("Staff locker", 214, 434, 42, 48), hide("Maintenance cabinet", 718, 437, 42, 48))
         ));
@@ -289,7 +289,11 @@ public final class MuseumLevel {
     }
 
     private static GuardRoute route(String name, int x, int y, int speed, Point... points) {
-        return new GuardRoute(name, new Point(x, y), speed, Arrays.asList(points));
+        return new GuardRoute(name, Guard.GuardType.REGULAR, new Point(x, y), speed, Arrays.asList(points));
+    }
+
+    private static GuardRoute route(String name, Guard.GuardType type, int x, int y, int speed, Point... points) {
+        return new GuardRoute(name, type, new Point(x, y), speed, Arrays.asList(points));
     }
 
     private static HideSpotData hide(String name, int x, int y, int width, int height) {
@@ -379,16 +383,21 @@ public final class MuseumLevel {
 
     public static final class GuardRoute {
         private final String name;
+        private final Guard.GuardType guardType;
         private final Point start;
         private final int speed;
         private final List<Point> waypoints;
-        private GuardRoute(String name, Point start, int speed, List<Point> waypoints) {
+
+        private GuardRoute(String name, Guard.GuardType guardType, Point start, int speed, List<Point> waypoints) {
             this.name = name;
+            this.guardType = guardType != null ? guardType : Guard.GuardType.REGULAR;
             this.start = new Point(start);
             this.speed = speed;
             this.waypoints = copyPoints(waypoints);
         }
+
         public String getName() { return name; }
+        public Guard.GuardType getGuardType() { return guardType; }
         public Point getStart() { return new Point(start); }
         public int getSpeed() { return speed; }
         public List<Point> getWaypoints() { return waypoints; }
