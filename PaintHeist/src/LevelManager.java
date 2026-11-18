@@ -10,9 +10,14 @@ import java.util.Set;
 
 public final class LevelManager {
     public static final String[] OUTFIT_NAMES = {
-        "Midnight Thief", "Crimson Phantom", "Emerald Forger", "Gilded Master"
+        "Classic Thief", "Museum Staff Disguise", "Formal Suit", "Dark Stealth Outfit", "Casual Outfit"
     };
-    public static final int[] OUTFIT_COSTS = {0, 15, 25, 40};
+    public static final int[] OUTFIT_COSTS = {0, 20, 30, 45, 60};
+
+    public static final String[] ACCESSORY_NAMES = {
+        "None", "Burglar Mask", "Gold Monocle", "Velvet Beret", "Tactical Visor", "Canvas Satchel"
+    };
+    public static final int[] ACCESSORY_COSTS = {0, 15, 25, 30, 40, 50};
     public static final String UPGRADE_FAST_COPY = "fastCopy";
     public static final String UPGRADE_LONG_THROW = "longThrow";
     public static final String UPGRADE_LONG_SWITCH = "longSwitch";
@@ -58,7 +63,11 @@ public final class LevelManager {
     private int totalRewards;
     private int unlockedOutfitsMask = 1;
     private int selectedOutfit;
+    private int unlockedAccessoriesMask = 1;
+    private int selectedAccessory;
     private boolean lightingEnabled = true;
+    private boolean visionConesEnabled = true;
+    private boolean promptsEnabled = true;
 
     public LevelManager() {
         for (int i = 0; i < bestTimes.length; i++) bestTimes[i] = -1;
@@ -105,6 +114,30 @@ public final class LevelManager {
         totalRewards -= cost;
         unlockedOutfitsMask |= (1 << index);
         selectedOutfit = index;
+        save();
+        return true;
+    }
+
+    public boolean isAccessoryUnlocked(int index) {
+        return index >= 0 && index < ACCESSORY_NAMES.length && (unlockedAccessoriesMask & (1 << index)) != 0;
+    }
+
+    public int getSelectedAccessory() {
+        return selectedAccessory;
+    }
+
+    public boolean selectOrBuyAccessory(int index) {
+        if (index < 0 || index >= ACCESSORY_NAMES.length) return false;
+        if (isAccessoryUnlocked(index)) {
+            selectedAccessory = index;
+            save();
+            return true;
+        }
+        int cost = ACCESSORY_COSTS[index];
+        if (totalRewards < cost) return false;
+        totalRewards -= cost;
+        unlockedAccessoriesMask |= (1 << index);
+        selectedAccessory = index;
         save();
         return true;
     }
@@ -162,6 +195,24 @@ public final class LevelManager {
         save();
     }
 
+    public boolean isVisionConesEnabled() {
+        return visionConesEnabled;
+    }
+
+    public void setVisionConesEnabled(boolean enabled) {
+        visionConesEnabled = enabled;
+        save();
+    }
+
+    public boolean isPromptsEnabled() {
+        return promptsEnabled;
+    }
+
+    public void setPromptsEnabled(boolean enabled) {
+        promptsEnabled = enabled;
+        save();
+    }
+
     public void saveSettings() {
         save();
     }
@@ -199,25 +250,33 @@ public final class LevelManager {
         int avgShape = stolenCount > 0 ? (int) Math.round((double) totalShape / stolenCount) : avgQuality;
         int avgPosition = stolenCount > 0 ? (int) Math.round((double) totalPosition / stolenCount) : avgQuality;
 
+        int bonusLoot = world.getBonusLootMoney();
+        int stolenLoot = world.getStolenLootCount();
+        int totalLoot = world.getMap() != null ? world.getMap().getLoot().size() : 0;
+
         // Three-star rating system:
         // 1 Star: Successfully completed heist
-        // 2 Stars: Acceptable replica accuracy (>= 70%)
-        // 3 Stars: High accuracy (>= 85%) AND minimal detection (<= 1 incident)
+        // 2 Stars: Acceptable replica accuracy (>= 70%) AND at least 50% valuables stolen (if any)
+        // 3 Stars: High accuracy (>= 85%) AND minimal detection (<= 1 incident) AND all valuables stolen (if any)
         int stars = 1;
-        if (avgQuality >= 70) stars = 2;
-        if (avgQuality >= 85 && world.getDetectionIncidents() <= 1) stars = 3;
+        boolean goodLoot = totalLoot == 0 || stolenLoot >= (totalLoot + 1) / 2;
+        boolean allLoot = totalLoot == 0 || stolenLoot >= totalLoot;
+        if (avgQuality >= 70 && goodLoot) stars = 2;
+        if (avgQuality >= 85 && world.getDetectionIncidents() <= 1 && allLoot) stars = 3;
 
         // Rewards breakdown
         int baseReward = 15;
         int accuracyBonus = avgQuality >= 85 ? 15 : avgQuality >= 70 ? 8 : 0;
         int stealthBonus = world.getDetectionIncidents() == 0 ? 15 : world.getDetectionIncidents() <= 1 ? 5 : 0;
         int timeBonus = Math.max(0, remaining / 15);
-        int totalReward = baseReward + accuracyBonus + stealthBonus + timeBonus;
+        int lootReward = bonusLoot / 10;
+        int totalReward = baseReward + accuracyBonus + stealthBonus + timeBonus + lootReward;
 
         int score = remaining * 15 + stolenCount * 400
             + Math.max(0, 100 - world.getSuspicion()) * 5
             + (world.getDetectionIncidents() == 0 ? 500 : 0)
-            + avgQuality * 10;
+            + avgQuality * 10
+            + bonusLoot * 2;
 
         if (score > bestScores[level]) bestScores[level] = score;
         if (bestTimes[level] < 0 || elapsed < bestTimes[level]) {
@@ -226,9 +285,10 @@ public final class LevelManager {
         unlockedLevels = Math.max(unlockedLevels, Math.min(bestScores.length, level + 2));
         totalRewards += totalReward;
         save();
-        return new Result(score, stars, totalReward, baseReward, accuracyBonus, stealthBonus, timeBonus,
+        return new Result(score, stars, totalReward, baseReward, accuracyBonus, stealthBonus, timeBonus, lootReward,
             remaining, elapsed, world.getDetectionIncidents(), world.getSuspicion(),
-            stolenCount, world.getTargetCount(), avgQuality, avgColor, avgShape, avgPosition);
+            stolenCount, world.getTargetCount(), avgQuality, avgColor, avgShape, avgPosition,
+            bonusLoot, stolenLoot, totalLoot);
     }
 
     private void load() {
@@ -242,7 +302,12 @@ public final class LevelManager {
             unlockedOutfitsMask = Math.max(1, parseInt(props.getProperty("unlockedOutfits"), 1));
             int savedOutfit = parseInt(props.getProperty("selectedOutfit"), 0);
             selectedOutfit = isOutfitUnlocked(savedOutfit) ? savedOutfit : 0;
+            unlockedAccessoriesMask = Math.max(1, parseInt(props.getProperty("unlockedAccessories"), 1));
+            int savedAccessory = parseInt(props.getProperty("selectedAccessory"), 0);
+            selectedAccessory = isAccessoryUnlocked(savedAccessory) ? savedAccessory : 0;
             lightingEnabled = !"false".equalsIgnoreCase(props.getProperty("lightingEnabled", "true"));
+            visionConesEnabled = !"false".equalsIgnoreCase(props.getProperty("visionConesEnabled", "true"));
+            promptsEnabled = !"false".equalsIgnoreCase(props.getProperty("promptsEnabled", "true"));
             if ("true".equalsIgnoreCase(props.getProperty("muted", "false")) != SoundEffects.isMuted()) {
                 SoundEffects.toggleMute();
             }
@@ -281,7 +346,11 @@ public final class LevelManager {
         props.setProperty("totalRewards", Integer.toString(totalRewards));
         props.setProperty("unlockedOutfits", Integer.toString(unlockedOutfitsMask));
         props.setProperty("selectedOutfit", Integer.toString(selectedOutfit));
+        props.setProperty("unlockedAccessories", Integer.toString(unlockedAccessoriesMask));
+        props.setProperty("selectedAccessory", Integer.toString(selectedAccessory));
         props.setProperty("lightingEnabled", Boolean.toString(lightingEnabled));
+        props.setProperty("visionConesEnabled", Boolean.toString(visionConesEnabled));
+        props.setProperty("promptsEnabled", Boolean.toString(promptsEnabled));
         props.setProperty("muted", Boolean.toString(SoundEffects.isMuted()));
         for (String key : ALL_EQUIPMENT) {
             props.setProperty("upgrade." + key, Boolean.toString(ownedUpgrades.contains(key)));
@@ -315,6 +384,7 @@ public final class LevelManager {
         private final int accuracyBonus;
         private final int stealthBonus;
         private final int timeBonus;
+        private final int lootReward;
         private final int timeRemaining;
         private final int elapsedSeconds;
         private final int detectionIncidents;
@@ -325,12 +395,16 @@ public final class LevelManager {
         private final int colorAccuracy;
         private final int shapeAccuracy;
         private final int positionAccuracy;
+        private final int bonusLoot;
+        private final int stolenLoot;
+        private final int totalLoot;
 
         private Result(int score, int stars, int reward, int baseReward, int accuracyBonus,
-                       int stealthBonus, int timeBonus, int timeRemaining, int elapsedSeconds,
+                       int stealthBonus, int timeBonus, int lootReward, int timeRemaining, int elapsedSeconds,
                        int detectionIncidents, int suspicion, int paintingsStolen,
                        int targetPaintings, int averageAccuracy, int colorAccuracy,
-                       int shapeAccuracy, int positionAccuracy) {
+                       int shapeAccuracy, int positionAccuracy,
+                       int bonusLoot, int stolenLoot, int totalLoot) {
             this.score = score;
             this.stars = stars;
             this.reward = reward;
@@ -338,6 +412,7 @@ public final class LevelManager {
             this.accuracyBonus = accuracyBonus;
             this.stealthBonus = stealthBonus;
             this.timeBonus = timeBonus;
+            this.lootReward = lootReward;
             this.timeRemaining = timeRemaining;
             this.elapsedSeconds = elapsedSeconds;
             this.detectionIncidents = detectionIncidents;
@@ -348,6 +423,9 @@ public final class LevelManager {
             this.colorAccuracy = colorAccuracy;
             this.shapeAccuracy = shapeAccuracy;
             this.positionAccuracy = positionAccuracy;
+            this.bonusLoot = bonusLoot;
+            this.stolenLoot = stolenLoot;
+            this.totalLoot = totalLoot;
         }
 
         public int getScore() { return score; }
@@ -357,6 +435,7 @@ public final class LevelManager {
         public int getAccuracyBonus() { return accuracyBonus; }
         public int getStealthBonus() { return stealthBonus; }
         public int getTimeBonus() { return timeBonus; }
+        public int getLootReward() { return lootReward; }
         public int getTimeRemaining() { return timeRemaining; }
         public int getElapsedSeconds() { return elapsedSeconds; }
         public int getDetectionIncidents() { return detectionIncidents; }
@@ -367,5 +446,8 @@ public final class LevelManager {
         public int getColorAccuracy() { return colorAccuracy; }
         public int getShapeAccuracy() { return shapeAccuracy; }
         public int getPositionAccuracy() { return positionAccuracy; }
+        public int getBonusLoot() { return bonusLoot; }
+        public int getStolenLoot() { return stolenLoot; }
+        public int getTotalLoot() { return totalLoot; }
     }
 }

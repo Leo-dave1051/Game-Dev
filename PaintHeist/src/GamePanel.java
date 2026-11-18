@@ -140,6 +140,9 @@ public class GamePanel extends JPanel {
     private int gallerySelectedWing = 0;
     private String galleryInspectedPainting = null;
     private int customizePreviewDirection = 0;
+    private int customizeTab = 0;
+    private double cameraX;
+    private double cameraY;
     private MuseumMap.Painting forgeryPainting;
     private BufferedImage forgeryCanvas;
     private final java.util.List<BufferedImage> forgeryUndoList = new java.util.ArrayList<>();
@@ -149,8 +152,8 @@ public class GamePanel extends JPanel {
     private int forgeryBrushSize = 7;
     private boolean forgeryFillMode;
     private boolean forgeryZoomed;
-    private double forgeryTimeRemaining = 120.0;
-    private double forgeryMaxTime = 120.0;
+    private double forgeryTimeRemaining = 300.0;
+    private double forgeryMaxTime = 300.0;
     private Point forgeryLastDrawPoint;
     private int forgeryAccuracyPreview;
     private ForgeryEvaluator.EvaluationBreakdown forgeryBreakdownPreview;
@@ -275,7 +278,9 @@ public class GamePanel extends JPanel {
             } else if (screen == Screen.SHOP) {
                 clickable = shopItemAt(hoverX, hoverY) >= 0 || buttonBounds(390, 508).contains(hoverX, hoverY);
             } else if (screen == Screen.CUSTOMIZE) {
-                clickable = outfitCardAt(hoverX, hoverY) >= 0
+                clickable = customizeCardAt(hoverX, hoverY) >= 0
+                    || customizeTabBounds(0).contains(hoverX, hoverY)
+                    || customizeTabBounds(1).contains(hoverX, hoverY)
                     || customizeRotateLeftBounds().contains(hoverX, hoverY)
                     || customizeRotateRightBounds().contains(hoverX, hoverY)
                     || buttonBounds(390, 508).contains(hoverX, hoverY);
@@ -557,6 +562,14 @@ public class GamePanel extends JPanel {
             levelManager.hasUpgrade(LevelManager.UPGRADE_LONG_SWITCH)
         );
         world.applyEquipmentLoadout(levelManager.getEquippedItems());
+        MuseumMap map = world.getMap();
+        if (map != null) {
+            cameraX = Math.max(0, Math.min(map.getWidth() - WIDTH, world.getPlayerCenterX() - WIDTH / 2.0));
+            cameraY = Math.max(0, Math.min(map.getHeight() - HEIGHT, world.getPlayerCenterY() - HEIGHT / 2.0));
+        } else {
+            cameraX = 0;
+            cameraY = 0;
+        }
         screen = Screen.PLAYING;
         updateCursor();
         gameLoop.start();
@@ -665,10 +678,22 @@ public class GamePanel extends JPanel {
                 customizePreviewDirection = (customizePreviewDirection + 1) % 4;
                 SoundEffects.play(SoundEffects.Cue.CLICK);
                 repaint();
+            } else if (customizeTabBounds(0).contains(x, y)) {
+                customizeTab = 0;
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
+            } else if (customizeTabBounds(1).contains(x, y)) {
+                customizeTab = 1;
+                SoundEffects.play(SoundEffects.Cue.CLICK);
+                repaint();
             } else {
-                int outfit = outfitCardAt(x, y);
-                if (outfit >= 0) {
-                    handleCustomizeClick(outfit);
+                int card = customizeCardAt(x, y);
+                if (card >= 0) {
+                    if (customizeTab == 0) {
+                        handleCustomizeClick(card);
+                    } else {
+                        handleCustomizeAccessoryClick(card);
+                    }
                 } else if (buttonBounds(390, 508).contains(x, y)) {
                     SoundEffects.play(SoundEffects.Cue.CLICK);
                     handleEscape();
@@ -843,10 +868,36 @@ public class GamePanel extends JPanel {
     @Override
     protected void paintComponent(Graphics graphics) {
         super.paintComponent(graphics);
+        int panelW = getWidth();
+        int panelH = getHeight();
+
+        // 1. Edge-to-edge dark museum background prevents any raw Swing gray on any resolution
+        graphics.setColor(new Color(12, 11, 16));
+        graphics.fillRect(0, 0, panelW, panelH);
+
+        // 2. Full-bleed aspect-ratio COVER background for Main Menu & Submenus (no stretching, zero gray borders)
+        if ((screen == Screen.MENU || screen == Screen.LEVEL_SELECT || screen == Screen.SETTINGS
+                || screen == Screen.SHOP || screen == Screen.CUSTOMIZE || screen == Screen.GALLERY)
+                && uiAssets != null && uiAssets.menuBg != null) {
+            int bgW = uiAssets.menuBg.getWidth();
+            int bgH = uiAssets.menuBg.getHeight();
+            double coverScale = Math.max((double) panelW / bgW, (double) panelH / bgH);
+            int drawW = (int) Math.ceil(bgW * coverScale);
+            int drawH = (int) Math.ceil(bgH * coverScale);
+            int drawX = (panelW - drawW) / 2;
+            int drawY = (panelH - drawH) / 2;
+            Graphics2D bgG = (Graphics2D) graphics.create();
+            bgG.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            bgG.drawImage(uiAssets.menuBg, drawX, drawY, drawW, drawH, null);
+            bgG.setColor(new Color(8, 10, 15, screen == Screen.MENU ? 85 : 180));
+            bgG.fillRect(0, 0, panelW, panelH);
+            bgG.dispose();
+        }
+
         Graphics2D g = (Graphics2D) graphics.create();
-        double scale = Math.min(getWidth() / (double) WIDTH, getHeight() / (double) HEIGHT);
-        double offsetX = (getWidth() - WIDTH * scale) / 2;
-        double offsetY = (getHeight() - HEIGHT * scale) / 2;
+        double scale = Math.min(panelW / (double) WIDTH, panelH / (double) HEIGHT);
+        double offsetX = (panelW - WIDTH * scale) / 2.0;
+        double offsetY = (panelH - HEIGHT * scale) / 2.0;
         g.translate(offsetX, offsetY);
         g.scale(scale, scale);
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
@@ -870,26 +921,52 @@ public class GamePanel extends JPanel {
 
     private void drawGame(Graphics2D g, GameWorld game) {
         MuseumMap map = game.getMap();
-        map.draw(g, game.getPlayerCenterX(), game.getPlayerCenterY());
-        drawGuardVision(g, game.getGuards());
-        drawCameraVision(g, game.getCameras());
-        drawNoiseIndicators(g, game.getNoiseSystem().getEvents());
+        int mapW = map.getWidth();
+        int mapH = map.getHeight();
+
+        double targetCamX = Math.max(0, Math.min(mapW - WIDTH, game.getPlayerCenterX() - WIDTH / 2.0));
+        double targetCamY = Math.max(0, Math.min(mapH - HEIGHT, game.getPlayerCenterY() - HEIGHT / 2.0));
+
+        cameraX += (targetCamX - cameraX) * 0.15;
+        cameraY += (targetCamY - cameraY) * 0.15;
+        int camX = (int) Math.round(Math.max(0, Math.min(mapW - WIDTH, cameraX)));
+        int camY = (int) Math.round(Math.max(0, Math.min(mapH - HEIGHT, cameraY)));
+
+        Graphics2D worldG = (Graphics2D) g.create();
+        worldG.translate(-camX, -camY);
+
+        map.draw(worldG, game.getPlayerCenterX(), game.getPlayerCenterY());
+        if (levelManager.isVisionConesEnabled()) {
+            drawGuardVision(worldG, game.getGuards());
+        }
+        drawCameraVision(worldG, game.getCameras());
+        drawNoiseIndicators(worldG, game.getNoiseSystem().getEvents());
+
+        for (MuseumLoot item : map.getLoot()) {
+            item.draw(worldG, game.isNearLoot(item), animationFrame);
+        }
+
         for (MuseumMap.Painting painting : map.getPaintings()) {
-            drawPainting(g, painting, painting == game.getActivePainting());
+            drawPainting(worldG, painting, painting == game.getActivePainting());
         }
         for (MuseumMap.HideSpot spot : map.getHideSpots()) {
-            drawHideSpot(g, spot, game.isNear(spot), game.getHidingIn() == spot);
+            drawHideSpot(worldG, spot, game.isNear(spot), game.getHidingIn() == spot);
         }
-        for (Guard guard : game.getGuards()) drawGuard(g, guard);
-        drawPlayer(g, game);
-        drawDistractionEffect(g, game);
-        drawSmokeScreen(g, game);
+        for (Guard guard : game.getGuards()) drawGuard(worldG, guard);
+        drawPlayer(worldG, game);
+        drawDistractionEffect(worldG, game);
+        drawSmokeScreen(worldG, game);
         if (levelManager.isLightingEnabled()) {
-            drawLighting(g, game.getPlayerCenterX(), game.getPlayerCenterY());
+            drawLighting(worldG, game.getPlayerCenterX(), game.getPlayerCenterY(), mapW, mapH);
         }
+        worldG.dispose();
+
         if (screen == Screen.PLAYING) {
             drawHud(g, game);
-            drawPrompt(g, game);
+            drawMinimap(g, game, camX, camY);
+            if (levelManager.isPromptsEnabled()) {
+                drawPrompt(g, game);
+            }
         }
     }
 
@@ -1437,9 +1514,11 @@ public class GamePanel extends JPanel {
             Composite previous = g.getComposite();
             g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.75f));
             g.drawImage(frame, x, y, SPRITE_WIDTH, SPRITE_HEIGHT, null);
+            drawPlayerAccessory(g, x, y, SPRITE_WIDTH, SPRITE_HEIGHT, levelManager.getSelectedAccessory(), playerDirectionRow);
             g.setComposite(previous);
         } else {
             g.drawImage(frame, x, y, SPRITE_WIDTH, SPRITE_HEIGHT, null);
+            drawPlayerAccessory(g, x, y, SPRITE_WIDTH, SPRITE_HEIGHT, levelManager.getSelectedAccessory(), playerDirectionRow);
         }
     }
 
@@ -1606,11 +1685,11 @@ public class GamePanel extends JPanel {
         return null;
     }
 
-    private void drawLighting(Graphics2D g, double x, double y) {
-        java.awt.Rectangle playArea = new java.awt.Rectangle(0, 66, WIDTH, HEIGHT - 66);
+    private void drawLighting(Graphics2D g, double x, double y, int mapW, int mapH) {
+        java.awt.Rectangle playArea = new java.awt.Rectangle(0, 0, mapW, mapH);
         g.setColor(new Color(8, 10, 18, 68));
         g.fill(playArea);
-        float radius = 475f;
+        float radius = 520f;
         g.setPaint(new RadialGradientPaint(
             new Point((int) x, (int) y), radius,
             new float[]{0f, 0.32f, 0.72f, 1f},
@@ -1872,6 +1951,32 @@ public class GamePanel extends JPanel {
             drawTacticalChip(g, "🎯 LONG PITCH", chipX, chipY, new Color(155, 89, 182));
             chipX += 95;
         }
+
+        // Valuables HUD indicator on the bottom left
+        int totalLoot = game.getMap() != null ? game.getMap().getLoot().size() : 0;
+        if (totalLoot > 0) {
+            int lootX = 16;
+            int lootY = HEIGHT - 46;
+            int lootW = 165;
+            int lootH = 34;
+            g.setColor(new Color(18, 22, 32, 230));
+            g.fillRoundRect(lootX, lootY, lootW, lootH, 6, 6);
+            g.setColor(new Color(215, 175, 75));
+            g.drawRoundRect(lootX, lootY, lootW, lootH, 6, 6);
+
+            // Gold chalice mini icon
+            g.setColor(new Color(255, 215, 65));
+            g.fillOval(lootX + 8, lootY + 8, 14, 10);
+            g.fillRect(lootX + 13, lootY + 16, 4, 8);
+            g.fillRect(lootX + 9, lootY + 22, 12, 3);
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            g.setColor(new Color(245, 215, 120));
+            g.drawString("VALUABLES: $" + game.getBonusLootMoney(), lootX + 28, lootY + 15);
+            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+            g.setColor(new Color(180, 190, 205));
+            g.drawString("LOOTED " + game.getStolenLootCount() + "/" + totalLoot, lootX + 28, lootY + 27);
+        }
     }
 
     private void drawTacticalChip(Graphics2D g, String label, int x, int y, Color accent) {
@@ -1885,7 +1990,7 @@ public class GamePanel extends JPanel {
         g.drawString(label, x + 6, y + 11);
     }
 
-    private void drawMinimap(Graphics2D g, GameWorld game) {
+    private void drawMinimap(Graphics2D g, GameWorld game, int camX, int camY) {
         int mmX = 798;
         int mmY = 78;
         int mmW = 146;
@@ -1913,15 +2018,20 @@ public class GamePanel extends JPanel {
         g.setColor(new Color(110, 200, 255));
         g.drawString("RADAR // BLUEPRINT", mmX + 8, mmY + 11);
 
+        MuseumMap map = game.getMap();
+        if (map == null) return;
+        int mapW = map.getWidth();
+        int mapH = map.getHeight();
+
         // Coordinate scaling
-        double sx = (double) (mmW - 12) / WIDTH;
-        double sy = (double) (mmH - 18) / HEIGHT;
+        double sx = (double) (mmW - 12) / mapW;
+        double sy = (double) (mmH - 18) / mapH;
         int offX = mmX + 6;
         int offY = mmY + 14;
 
         // Draw Solids (Walls)
         g.setColor(new Color(40, 90, 150, 180));
-        for (Rectangle solid : game.getMap().getSolids()) {
+        for (Rectangle solid : map.getSolids()) {
             int bx = offX + (int) (solid.x * sx);
             int by = offY + (int) (solid.y * sy);
             int bw = Math.max(2, (int) (solid.width * sx));
@@ -1931,14 +2041,24 @@ public class GamePanel extends JPanel {
 
         // Draw Exits
         g.setColor(new Color(46, 204, 113));
-        for (Rectangle exit : game.getMap().getExits()) {
+        for (Rectangle exit : map.getExits()) {
             int ex = offX + (int) (exit.x * sx);
             int ey = offY + (int) (exit.y * sy);
             g.fillRect(ex, ey, Math.max(3, (int) (exit.width * sx)), Math.max(3, (int) (exit.height * sy)));
         }
 
+        // Draw Loot (Valuables)
+        for (MuseumLoot item : map.getLoot()) {
+            if (!item.isCollected()) {
+                int lx = offX + (int) ((item.getX() + item.getWidth() / 2.0) * sx);
+                int ly = offY + (int) ((item.getY() + item.getHeight() / 2.0) * sy);
+                g.setColor(new Color(255, 230, 90));
+                g.fillRect(lx - 1, ly - 1, 2, 2);
+            }
+        }
+
         // Draw Paintings
-        for (MuseumMap.Painting p : game.getMap().getPaintings()) {
+        for (MuseumMap.Painting p : map.getPaintings()) {
             int px = offX + (int) ((p.getX() + MuseumMap.Painting.WIDTH / 2.0) * sx);
             int py = offY + (int) ((p.getY() + MuseumMap.Painting.HEIGHT / 2.0) * sy);
             if (p.isStolen()) {
@@ -1970,6 +2090,14 @@ public class GamePanel extends JPanel {
             g.setColor(new Color(75, 200, 240));
             g.fillOval(cx - 1, cy - 1, 3, 3);
         }
+
+        // Camera Viewport box on Radar
+        g.setColor(new Color(120, 200, 255, 130));
+        int cvx = offX + (int) (camX * sx);
+        int cvy = offY + (int) (camY * sy);
+        int cvw = Math.max(4, (int) (WIDTH * sx));
+        int cvh = Math.max(4, (int) (HEIGHT * sy));
+        g.drawRect(cvx, cvy, cvw, cvh);
 
         // Draw Player Blip
         int plX = offX + (int) (game.getPlayerCenterX() * sx);
@@ -2031,12 +2159,12 @@ public class GamePanel extends JPanel {
     }
 
     private void drawMenu(Graphics2D g) {
-        if (uiAssets.menuBg != null) {
-            g.drawImage(uiAssets.menuBg, 0, 0, WIDTH, HEIGHT, null);
-            g.setColor(new Color(10, 12, 18, 78));
-            g.fillRect(0, 0, WIDTH, HEIGHT);
-            g.setColor(new Color(177, 133, 78, 165));
+        if (uiAssets != null && uiAssets.menuBg != null) {
+            // Ornate gold filigree frame framing the interactive menu content
+            g.setColor(new Color(177, 133, 78, 175));
             g.drawRect(22, 22, WIDTH - 44, HEIGHT - 44);
+            g.setColor(new Color(225, 181, 100, 85));
+            g.drawRect(26, 26, WIDTH - 52, HEIGHT - 52);
         } else {
             drawBackdrop(g);
             drawMuseumEmblem(g);
@@ -2185,7 +2313,7 @@ public class GamePanel extends JPanel {
             }
         } else {
             // Disguises Tab
-            if (item >= 0 && item < 4) {
+            if (item >= 0 && item < 5) {
                 int outfitIndex = item;
                 boolean wasUnlocked = levelManager.isOutfitUnlocked(outfitIndex);
                 if (levelManager.selectOrBuyOutfit(outfitIndex)) {
@@ -2197,7 +2325,10 @@ public class GamePanel extends JPanel {
                         + LevelManager.OUTFIT_NAMES[outfitIndex].toUpperCase() + ".";
                 }
             } else {
-                uiToast = "WARDROBE ATELIER: Master thief disguises provide legendary flair.";
+                screen = Screen.CUSTOMIZE;
+                updateCursor();
+                repaint();
+                return;
             }
         }
         updateCursor();
@@ -2291,6 +2422,10 @@ public class GamePanel extends JPanel {
     }
 
     private void drawDisguiseMannequin(Graphics2D g, int outfitIndex, int cx, int cy) {
+        drawDisguiseMannequin(g, outfitIndex, 0, cx, cy);
+    }
+
+    private void drawDisguiseMannequin(Graphics2D g, int outfitIndex, int accessoryIndex, int cx, int cy) {
         g.setColor(new Color(10, 10, 14, 180));
         g.fillOval(cx - 18, cy + 18, 36, 10);
         g.setColor(new Color(140, 110, 60));
@@ -2303,6 +2438,7 @@ public class GamePanel extends JPanel {
             Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             g.drawImage(tinted, cx - 24, cy - 30, 48, 56, null);
+            drawPlayerAccessory(g, cx - 24, cy - 30, 48, 56, accessoryIndex, 0);
             if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
         }
     }
@@ -2484,35 +2620,38 @@ public class GamePanel extends JPanel {
                 LevelManager.OUTFIT_NAMES[1].toUpperCase(),
                 LevelManager.OUTFIT_NAMES[2].toUpperCase(),
                 LevelManager.OUTFIT_NAMES[3].toUpperCase(),
-                "SYNDICATE MIRROR", "FENCE DISPATCH"
+                LevelManager.OUTFIT_NAMES[4].toUpperCase(),
+                "SYNDICATE MIRROR"
             };
             String[] descs = {
                 "Standard issue dark wool infiltrator suit",
-                "Velvet ruby cloak tailored for midnight heists",
-                "Specialist jade weave woven for ghost runs",
-                "Gold embroidered trophy coat for master thieves",
-                "Operative disguise vanity preview station",
-                "Black market contacts across 5 continental galleries"
+                "Curator uniform. Pass through halls in plain sight",
+                "Formal crimson velvet suit tailored for midnight heists",
+                "Dark stealth shadow weave for silent ghost runs",
+                "Casual street rogue outfit with gold trim accents",
+                "Operative disguise and headwear vanity atelier"
             };
             int[] costs = {
                 0,
                 LevelManager.OUTFIT_COSTS[1],
                 LevelManager.OUTFIT_COSTS[2],
                 LevelManager.OUTFIT_COSTS[3],
-                0, 0
+                LevelManager.OUTFIT_COSTS[4],
+                0
             };
             boolean[] owned = {
                 true,
                 levelManager.isOutfitUnlocked(1),
                 levelManager.isOutfitUnlocked(2),
                 levelManager.isOutfitUnlocked(3),
-                true, true
+                levelManager.isOutfitUnlocked(4),
+                true
             };
 
             for (int i = 0; i < 6; i++) {
                 Rectangle card = shopItemBounds(i);
                 boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
-                boolean equipped = i < 4 && levelManager.getSelectedOutfit() == i;
+                boolean equipped = i < 5 && levelManager.getSelectedOutfit() == i;
 
                 g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
                 g.fillRoundRect(card.x, card.y, card.width, card.height, 10, 10);
@@ -2526,10 +2665,10 @@ public class GamePanel extends JPanel {
                 g.setColor(new Color(60, 50, 45));
                 g.drawRoundRect(ibx, iby, ibw, ibh, 6, 6);
 
-                if (i < 4) {
+                if (i < 5) {
                     drawDisguiseMannequin(g, i, ibx + ibw / 2, iby + ibh / 2 + 10);
                 } else {
-                    drawGadgetIcon(g, i == 4 ? 4 : 5, ibx + ibw / 2, iby + ibh / 2, 48);
+                    drawGadgetIcon(g, 5, ibx + ibw / 2, iby + ibh / 2, 48);
                 }
 
                 // Right content
@@ -2539,8 +2678,8 @@ public class GamePanel extends JPanel {
                 g.drawString(names[i], tx, card.y + 24);
 
                 g.setFont(new Font("Monospaced", Font.BOLD, 9));
-                g.setColor(i < 4 ? new Color(245, 175, 80) : new Color(110, 230, 180));
-                g.drawString(i < 4 ? "[THIEF DISGUISE]" : "[SPECIAL FACILITY]", tx, card.y + 38);
+                g.setColor(i < 5 ? new Color(245, 175, 80) : new Color(110, 230, 180));
+                g.drawString(i < 5 ? "[THIEF DISGUISE]" : "[SPECIAL FACILITY]", tx, card.y + 38);
 
                 g.setFont(new Font("Monospaced", Font.PLAIN, 10));
                 g.setColor(new Color(195, 190, 205));
@@ -2552,7 +2691,7 @@ public class GamePanel extends JPanel {
                 int btnW = 185;
                 int btnH = 26;
 
-                if (i < 4) {
+                if (i < 5) {
                     if (equipped) {
                         g.setColor(new Color(25, 65, 38));
                         g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
@@ -2596,7 +2735,7 @@ public class GamePanel extends JPanel {
                     g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
                     g.setFont(new Font("Monospaced", Font.BOLD, 9));
                     g.setColor(new Color(175, 205, 245));
-                    drawCentered(g, "✦ SYNDICATE PERK", btnX + btnW / 2, btnY + 17);
+                    drawCentered(g, "✦ OPEN CUSTOMIZE ATELIER", btnX + btnW / 2, btnY + 17);
                 }
             }
         }
@@ -2617,15 +2756,20 @@ public class GamePanel extends JPanel {
         return new Rectangle(214, 371, 104, 30);
     }
 
-    private Rectangle outfitCardBounds(int index) {
-        int col = index % 2;
-        int row = index / 2;
-        return new Rectangle(350 + col * 270, 106 + row * 174, 260, 160);
+    private Rectangle customizeTabBounds(int tab) {
+        return new Rectangle(350 + tab * 145, 106, 135, 28);
     }
 
-    private int outfitCardAt(int x, int y) {
-        for (int i = 0; i < LevelManager.OUTFIT_NAMES.length; i++) {
-            if (outfitCardBounds(i).contains(x, y)) return i;
+    private Rectangle customizeCardBounds(int index) {
+        int col = index % 2;
+        int row = index / 2;
+        return new Rectangle(350 + col * 270, 142 + row * 108, 260, 100);
+    }
+
+    private int customizeCardAt(int x, int y) {
+        int count = customizeTab == 0 ? LevelManager.OUTFIT_NAMES.length : LevelManager.ACCESSORY_NAMES.length;
+        for (int i = 0; i < count; i++) {
+            if (customizeCardBounds(i).contains(x, y)) return i;
         }
         return -1;
     }
@@ -2643,17 +2787,31 @@ public class GamePanel extends JPanel {
         repaint();
     }
 
+    private void handleCustomizeAccessoryClick(int accessory) {
+        SoundEffects.play(SoundEffects.Cue.CLICK);
+        boolean wasUnlocked = levelManager.isAccessoryUnlocked(accessory);
+        if (levelManager.selectOrBuyAccessory(accessory)) {
+            uiToast = (wasUnlocked ? "EQUIPPED " : "UNLOCKED & EQUIPPED ")
+                + LevelManager.ACCESSORY_NAMES[accessory].toUpperCase() + "!";
+        } else {
+            uiToast = "LOCKED: NEED " + LevelManager.ACCESSORY_COSTS[accessory] + " CREDITS.";
+        }
+        updateCursor();
+        repaint();
+    }
+
     private void drawCustomize(Graphics2D g) {
         drawBackdrop(g);
         g.setFont(new Font("Monospaced", Font.BOLD, 26));
         g.setColor(new Color(255, 220, 144));
-        drawCentered(g, "SAFEHOUSE ATELIER: CUSTOMIZE THIEF", WIDTH / 2, 60);
+        drawCentered(g, "SAFEHOUSE ATELIER: CUSTOMIZE OPERATIVE", WIDTH / 2, 60);
         g.setFont(new Font("Monospaced", Font.PLAIN, 11));
         g.setColor(new Color(195, 185, 205));
-        drawCentered(g, "Rotate your operative in the mirror. Choose your undercover heist cloak.   CREDITS: "
+        drawCentered(g, "Rotate operative in mirror. Choose your stealth disguise & headwear.   CREDITS: "
             + levelManager.getTotalRewards() + " CR", WIDTH / 2, 78);
 
-        int selected = levelManager.getSelectedOutfit();
+        int selectedOutfit = levelManager.getSelectedOutfit();
+        int selectedAccessory = levelManager.getSelectedAccessory();
 
         // 1. Safehouse Dressing Mirror Frame (Left)
         int mx = 84, my = 106, mw = 246, mh = 356;
@@ -2676,21 +2834,25 @@ public class GamePanel extends JPanel {
         if (playerSpriteFrames != null && playerSpriteFrames.length > 0 && playerSpriteFrames[0].length > 0) {
             int frame = (int) (animationFrame / 7 % SPRITE_STRIP_FRAME_COUNT);
             int actionRow = ACTION_ROW_START[WALK_ACTION] + customizePreviewDirection;
-            BufferedImage frameImg = getTintedPlayerFrame(playerSpriteFrames[actionRow][frame], selected);
+            BufferedImage frameImg = getTintedPlayerFrame(playerSpriteFrames[actionRow][frame], selectedOutfit);
             Object oldHint = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             g.drawImage(frameImg, mx + 68, my + 55, 110, 146, null);
+            drawPlayerAccessory(g, mx + 68, my + 55, 110, 146, selectedAccessory, customizePreviewDirection);
             if (oldHint != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldHint);
         }
 
-        // Active outfit name badge
-        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        // Active outfit and accessory badges
+        g.setFont(new Font("Monospaced", Font.BOLD, 12));
         g.setColor(new Color(255, 230, 165));
-        drawCentered(g, LevelManager.OUTFIT_NAMES[selected].toUpperCase(), mx + mw / 2, my + 236);
+        drawCentered(g, LevelManager.OUTFIT_NAMES[selectedOutfit].toUpperCase(), mx + mw / 2, my + 234);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setColor(new Color(195, 215, 245));
+        drawCentered(g, "GEAR: " + LevelManager.ACCESSORY_NAMES[selectedAccessory].toUpperCase(), mx + mw / 2, my + 249);
+
         g.setColor(new Color(120, 235, 160));
-        drawCentered(g, "● CURRENTLY WORN IN HEISTS", mx + mw / 2, my + 252);
+        drawCentered(g, "● WORN IN HEISTS", mx + mw / 2, my + 263);
 
         // Rotation Buttons below mirror
         Rectangle rotL = customizeRotateLeftBounds();
@@ -2712,75 +2874,166 @@ public class GamePanel extends JPanel {
         g.drawRoundRect(rotR.x, rotR.y, rotR.width, rotR.height, 5, 5);
         drawCentered(g, "ROTATE ►", rotR.x + rotR.width / 2, rotR.y + 19);
 
-        // 2. Disguise Selection Cards (Right)
-        String[][] outfitFlavors = {
-            {"Midnight operative cloak.", "Blends into gallery shadows."},
-            {"Bold ruby velvet coat.", "Tailored for midnight runs."},
-            {"Specialist jade weave.", "Silent ghost infiltration."},
-            {"Gleaming gold trim coat.", "Attire for heist legends."}
-        };
+        // 2. Atelier Category Tabs (Right)
+        String[] tabLabels = {"✦ HEIST DISGUISES (5)", "★ HEADWEAR & GEAR (6)"};
+        for (int t = 0; t < 2; t++) {
+            Rectangle tb = customizeTabBounds(t);
+            boolean tabHover = hoverX >= 0 && hoverY >= 0 && tb.contains(hoverX, hoverY);
+            boolean tabActive = customizeTab == t;
+            g.setColor(tabActive ? new Color(60, 48, 36) : tabHover ? new Color(42, 38, 50) : new Color(26, 24, 32));
+            g.fillRoundRect(tb.x, tb.y, tb.width, tb.height, 6, 6);
+            g.setColor(tabActive ? GOLD : tabHover ? new Color(210, 175, 95) : new Color(75, 68, 75));
+            g.drawRoundRect(tb.x, tb.y, tb.width, tb.height, 6, 6);
+            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setColor(tabActive ? new Color(255, 235, 170) : new Color(185, 180, 195));
+            drawCentered(g, tabLabels[t], tb.x + tb.width / 2, tb.y + 18);
+        }
 
-        for (int i = 0; i < LevelManager.OUTFIT_NAMES.length; i++) {
-            Rectangle card = outfitCardBounds(i);
-            boolean unlocked = levelManager.isOutfitUnlocked(i);
-            boolean equipped = selected == i;
-            boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
+        // 3. Selection Cards
+        if (customizeTab == 0) {
+            String[][] outfitFlavors = {
+                {"Midnight operative cloak.", "Blends into gallery shadows."},
+                {"Museum staff disguise.", "Walk unnoticed past curatorial eyes."},
+                {"Formal crimson velvet suit.", "Tailored for midnight gala heists."},
+                {"Dark stealth shadow weave.", "Engineered for silent ghost runs."},
+                {"Casual street rogue jacket.", "Nimble rogue urban mobility."}
+            };
 
-            g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
-            g.fillRoundRect(card.x, card.y, card.width, card.height, 8, 8);
-            g.setColor(equipped ? GOLD : hovered ? new Color(210, 175, 95) : unlocked ? new Color(110, 150, 115) : new Color(75, 68, 75));
-            g.drawRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+            for (int i = 0; i < LevelManager.OUTFIT_NAMES.length; i++) {
+                Rectangle card = customizeCardBounds(i);
+                boolean unlocked = levelManager.isOutfitUnlocked(i);
+                boolean equipped = selectedOutfit == i;
+                boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
 
-            // Left mini portrait box
-            int pbx = card.x + 12, pby = card.y + 12, pbw = 64, pbh = 78;
-            g.setColor(new Color(16, 14, 20));
-            g.fillRoundRect(pbx, pby, pbw, pbh, 5, 5);
-            g.setColor(new Color(55, 48, 58));
-            g.drawRoundRect(pbx, pby, pbw, pbh, 5, 5);
-            drawDisguiseMannequin(g, i, pbx + pbw / 2, pby + pbh / 2 + 8);
+                g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
+                g.fillRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+                g.setColor(equipped ? GOLD : hovered ? new Color(210, 175, 95) : unlocked ? new Color(110, 150, 115) : new Color(75, 68, 75));
+                g.drawRoundRect(card.x, card.y, card.width, card.height, 8, 8);
 
-            // Right title & perk
-            int tx = card.x + 86;
-            g.setFont(new Font("Monospaced", Font.BOLD, 12));
-            g.setColor(new Color(255, 225, 155));
-            g.drawString(LevelManager.OUTFIT_NAMES[i].toUpperCase(), tx, card.y + 28);
+                // Left mini portrait box
+                int pbx = card.x + 8, pby = card.y + 8, pbw = 58, pbh = 84;
+                g.setColor(new Color(16, 14, 20));
+                g.fillRoundRect(pbx, pby, pbw, pbh, 5, 5);
+                g.setColor(new Color(55, 48, 58));
+                g.drawRoundRect(pbx, pby, pbw, pbh, 5, 5);
+                drawDisguiseMannequin(g, i, selectedAccessory, pbx + pbw / 2, pby + pbh / 2 + 10);
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-            g.setColor(new Color(185, 180, 195));
-            g.drawString(outfitFlavors[i][0], tx, card.y + 46);
-            g.drawString(outfitFlavors[i][1], tx, card.y + 60);
+                // Right title & perk
+                int tx = card.x + 74;
+                g.setFont(new Font("Monospaced", Font.BOLD, 11));
+                g.setColor(new Color(255, 225, 155));
+                g.drawString(LevelManager.OUTFIT_NAMES[i].toUpperCase(), tx, card.y + 20);
 
-            // Action Button
-            int btnX = card.x + 12;
-            int btnY = card.y + 104;
-            int btnW = card.width - 24;
-            int btnH = 42;
+                g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+                g.setColor(new Color(185, 180, 195));
+                g.drawString(outfitFlavors[i][0], tx, card.y + 35);
+                g.drawString(outfitFlavors[i][1], tx, card.y + 48);
 
-            if (equipped) {
-                g.setColor(new Color(25, 65, 38));
-                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setColor(new Color(65, 215, 120));
-                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                g.setColor(new Color(130, 255, 170));
-                drawCentered(g, "✔ CURRENTLY EQUIPPED", btnX + btnW / 2, btnY + 22);
-            } else if (unlocked) {
-                g.setColor(hovered ? new Color(85, 68, 45) : new Color(55, 45, 32));
-                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setColor(new Color(235, 195, 105));
-                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                g.setColor(new Color(255, 235, 170));
-                drawCentered(g, "✦ CLICK TO EQUIP", btnX + btnW / 2, btnY + 22);
-            } else {
-                boolean canAfford = levelManager.getTotalRewards() >= LevelManager.OUTFIT_COSTS[i];
-                g.setColor(canAfford ? (hovered ? new Color(110, 85, 25) : new Color(75, 55, 18)) : new Color(28, 26, 32));
-                g.fillRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setColor(canAfford ? new Color(255, 215, 100) : new Color(70, 65, 75));
-                g.drawRoundRect(btnX, btnY, btnW, btnH, 6, 6);
-                g.setFont(new Font("Monospaced", Font.BOLD, 10));
-                g.setColor(canAfford ? new Color(255, 245, 210) : new Color(145, 140, 150));
-                drawCentered(g, canAfford ? "💰 UNLOCK - " + LevelManager.OUTFIT_COSTS[i] + " CR" : "🔒 LOCKED - " + LevelManager.OUTFIT_COSTS[i] + " CR", btnX + btnW / 2, btnY + 22);
+                // Action Button Pill
+                int btnX = tx;
+                int btnY = card.y + 60;
+                int btnW = card.width - 82;
+                int btnH = 28;
+
+                if (equipped) {
+                    g.setColor(new Color(25, 65, 38));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setColor(new Color(65, 215, 120));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(130, 255, 170));
+                    drawCentered(g, "✔ CURRENTLY WORN", btnX + btnW / 2, btnY + 18);
+                } else if (unlocked) {
+                    g.setColor(hovered ? new Color(85, 68, 45) : new Color(55, 45, 32));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setColor(new Color(235, 195, 105));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(255, 235, 170));
+                    drawCentered(g, "✦ EQUIP DISGUISE", btnX + btnW / 2, btnY + 18);
+                } else {
+                    boolean canAfford = levelManager.getTotalRewards() >= LevelManager.OUTFIT_COSTS[i];
+                    g.setColor(canAfford ? (hovered ? new Color(110, 85, 25) : new Color(75, 55, 18)) : new Color(28, 26, 32));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setColor(canAfford ? new Color(255, 215, 100) : new Color(70, 65, 75));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                    g.setColor(canAfford ? new Color(255, 245, 210) : new Color(145, 140, 150));
+                    drawCentered(g, canAfford ? "💰 UNLOCK - " + LevelManager.OUTFIT_COSTS[i] + " CR" : "🔒 LOCKED - " + LevelManager.OUTFIT_COSTS[i] + " CR", btnX + btnW / 2, btnY + 18);
+                }
+            }
+        } else {
+            String[][] accessoryFlavors = {
+                {"Bare operative silhouette.", "No accessory worn on head."},
+                {"Black bandit eye mask.", "Conceals identity in shadows."},
+                {"Polished gold monocle.", "Inspect fine art details."},
+                {"Tilted Parisian beret.", "Aesthetic flair of an art auteur."},
+                {"Cyan tactical visor.", "Night-vision stealth optic HUD."},
+                {"Canvas cross-body bag.", "Roomy storage for museum loot."}
+            };
+
+            for (int i = 0; i < LevelManager.ACCESSORY_NAMES.length; i++) {
+                Rectangle card = customizeCardBounds(i);
+                boolean unlocked = levelManager.isAccessoryUnlocked(i);
+                boolean equipped = selectedAccessory == i;
+                boolean hovered = hoverX >= 0 && hoverY >= 0 && card.contains(hoverX, hoverY);
+
+                g.setColor(equipped ? new Color(52, 42, 34) : hovered ? new Color(42, 38, 50) : new Color(28, 26, 35));
+                g.fillRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+                g.setColor(equipped ? GOLD : hovered ? new Color(210, 175, 95) : unlocked ? new Color(110, 150, 115) : new Color(75, 68, 75));
+                g.drawRoundRect(card.x, card.y, card.width, card.height, 8, 8);
+
+                // Left mini portrait box
+                int pbx = card.x + 8, pby = card.y + 8, pbw = 58, pbh = 84;
+                g.setColor(new Color(16, 14, 20));
+                g.fillRoundRect(pbx, pby, pbw, pbh, 5, 5);
+                g.setColor(new Color(55, 48, 58));
+                g.drawRoundRect(pbx, pby, pbw, pbh, 5, 5);
+                drawDisguiseMannequin(g, selectedOutfit, i, pbx + pbw / 2, pby + pbh / 2 + 10);
+
+                // Right title & perk
+                int tx = card.x + 74;
+                g.setFont(new Font("Monospaced", Font.BOLD, 11));
+                g.setColor(new Color(255, 225, 155));
+                g.drawString(LevelManager.ACCESSORY_NAMES[i].toUpperCase(), tx, card.y + 20);
+
+                g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+                g.setColor(new Color(185, 180, 195));
+                g.drawString(accessoryFlavors[i][0], tx, card.y + 35);
+                g.drawString(accessoryFlavors[i][1], tx, card.y + 48);
+
+                // Action Button Pill
+                int btnX = tx;
+                int btnY = card.y + 60;
+                int btnW = card.width - 82;
+                int btnH = 28;
+
+                if (equipped) {
+                    g.setColor(new Color(25, 65, 38));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setColor(new Color(65, 215, 120));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(130, 255, 170));
+                    drawCentered(g, "✔ CURRENTLY WORN", btnX + btnW / 2, btnY + 18);
+                } else if (unlocked) {
+                    g.setColor(hovered ? new Color(85, 68, 45) : new Color(55, 45, 32));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setColor(new Color(235, 195, 105));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(255, 235, 170));
+                    drawCentered(g, "✦ EQUIP GEAR", btnX + btnW / 2, btnY + 18);
+                } else {
+                    boolean canAfford = levelManager.getTotalRewards() >= LevelManager.ACCESSORY_COSTS[i];
+                    g.setColor(canAfford ? (hovered ? new Color(110, 85, 25) : new Color(75, 55, 18)) : new Color(28, 26, 32));
+                    g.fillRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setColor(canAfford ? new Color(255, 215, 100) : new Color(70, 65, 75));
+                    g.drawRoundRect(btnX, btnY, btnW, btnH, 5, 5);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 9));
+                    g.setColor(canAfford ? new Color(255, 245, 210) : new Color(145, 140, 150));
+                    drawCentered(g, canAfford ? "💰 UNLOCK - " + LevelManager.ACCESSORY_COSTS[i] + " CR" : "🔒 LOCKED - " + LevelManager.ACCESSORY_COSTS[i] + " CR", btnX + btnW / 2, btnY + 18);
+                }
             }
         }
 
@@ -2793,11 +3046,11 @@ public class GamePanel extends JPanel {
     }
 
     private Rectangle settingsRowBounds(int row) {
-        return new Rectangle(180, 114 + row * 66, 600, 54);
+        return new Rectangle(160, 94 + row * 45, 640, 39);
     }
 
     private int settingsRowAt(int x, int y) {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 5; i++) {
             if (settingsRowBounds(i).contains(x, y)) return i;
         }
         return -1;
@@ -2817,6 +3070,14 @@ public class GamePanel extends JPanel {
             SoundEffects.play(SoundEffects.Cue.CLICK);
             levelManager.setLightingEnabled(!levelManager.isLightingEnabled());
             uiToast = levelManager.isLightingEnabled() ? "GALLERY VIGNETTE ENABLED." : "HIGH VISIBILITY LIGHTING ENABLED.";
+        } else if (row == 3) {
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            levelManager.setVisionConesEnabled(!levelManager.isVisionConesEnabled());
+            uiToast = levelManager.isVisionConesEnabled() ? "GUARD VISION CONES VISIBLE." : "GUARD VISION CONES HIDDEN.";
+        } else if (row == 4) {
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            levelManager.setPromptsEnabled(!levelManager.isPromptsEnabled());
+            uiToast = levelManager.isPromptsEnabled() ? "ACTION PROMPTS VISIBLE." : "ACTION PROMPTS HIDDEN.";
         }
         updateCursor();
         repaint();
@@ -2826,63 +3087,71 @@ public class GamePanel extends JPanel {
         drawBackdrop(g);
         g.setFont(new Font("Monospaced", Font.BOLD, 26));
         g.setColor(new Color(255, 220, 144));
-        drawCentered(g, "SETTINGS & CONTROLS", WIDTH / 2, 60);
+        drawCentered(g, "SETTINGS & CONTROLS", WIDTH / 2, 54);
         g.setFont(new Font("Monospaced", Font.PLAIN, 11));
         g.setColor(new Color(195, 185, 205));
-        drawCentered(g, "Click any option below to toggle audio and visual preferences.", WIDTH / 2, 78);
+        drawCentered(g, "Click any option below to toggle audio, display, and stealth preferences.", WIDTH / 2, 72);
 
-        String[] labels = {"SOUND EFFECTS", "DISPLAY MODE", "GALLERY LIGHTING"};
+        String[] labels = {
+            "SOUND EFFECTS", "DISPLAY MODE", "GALLERY LIGHTING", "VISION CONES", "ACTION PROMPTS"
+        };
         String[] descs = {
             "Master environmental and sneaking audio cues",
             "Toggle between windowed and borderless fullscreen",
-            "Atmospheric dark gallery shadows vs high visibility"
+            "Atmospheric dark gallery shadows vs high visibility",
+            "Show directional guard flashlight sight beams",
+            "Display key indicators above loot, targets and hiding spots"
         };
         boolean[] states = {
             !SoundEffects.isMuted(),
             Main.isFullScreen(),
-            levelManager.isLightingEnabled()
+            levelManager.isLightingEnabled(),
+            levelManager.isVisionConesEnabled(),
+            levelManager.isPromptsEnabled()
         };
         String[] stateLabels = {
             SoundEffects.isMuted() ? "MUTED" : "ENABLED",
             Main.isFullScreen() ? "FULL SCREEN" : "WINDOWED",
-            levelManager.isLightingEnabled() ? "VIGNETTE" : "HIGH VISIBILITY"
+            levelManager.isLightingEnabled() ? "VIGNETTE" : "HIGH VISIBILITY",
+            levelManager.isVisionConesEnabled() ? "VISIBLE" : "HIDDEN",
+            levelManager.isPromptsEnabled() ? "VISIBLE" : "HIDDEN"
         };
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 5; i++) {
             Rectangle row = settingsRowBounds(i);
             boolean hovered = hoverX >= 0 && hoverY >= 0 && row.contains(hoverX, hoverY);
 
             g.setColor(hovered ? new Color(45, 40, 52) : new Color(28, 26, 35));
-            g.fillRoundRect(row.x, row.y, row.width, row.height, 8, 8);
+            g.fillRoundRect(row.x, row.y, row.width, row.height, 6, 6);
             g.setColor(hovered ? GOLD : new Color(110, 95, 80));
-            g.drawRoundRect(row.x, row.y, row.width, row.height, 8, 8);
+            g.drawRoundRect(row.x, row.y, row.width, row.height, 6, 6);
 
             // Left labels
-            g.setFont(new Font("Monospaced", Font.BOLD, 13));
+            g.setFont(new Font("Monospaced", Font.BOLD, 12));
             g.setColor(new Color(255, 225, 155));
-            g.drawString(labels[i], row.x + 22, row.y + 24);
+            g.drawString(labels[i], row.x + 18, row.y + 17);
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
             g.setColor(new Color(175, 170, 185));
-            g.drawString(descs[i], row.x + 22, row.y + 42);
+            g.drawString(descs[i], row.x + 18, row.y + 31);
 
             // Right Toggle Switch Pill
-            int swW = 140, swH = 32;
-            int swX = row.x + row.width - swW - 20, swY = row.y + (row.height - swH) / 2;
+            int swW = 140, swH = 26;
+            int swX = row.x + row.width - swW - 14, swY = row.y + (row.height - swH) / 2;
 
             boolean on = states[i];
             g.setColor(on ? new Color(25, 65, 38) : new Color(45, 35, 38));
-            g.fillRoundRect(swX, swY, swW, swH, 6, 6);
+            g.fillRoundRect(swX, swY, swW, swH, 5, 5);
             g.setColor(on ? new Color(65, 215, 120) : new Color(180, 90, 90));
-            g.drawRoundRect(swX, swY, swW, swH, 6, 6);
+            g.drawRoundRect(swX, swY, swW, swH, 5, 5);
 
             g.setFont(new Font("Monospaced", Font.BOLD, 10));
             g.setColor(on ? new Color(130, 255, 170) : new Color(240, 140, 140));
-            drawCentered(g, (on ? "● " : "○ ") + stateLabels[i], swX + swW / 2, swY + 20);
+            drawCentered(g, (on ? "● " : "○ ") + stateLabels[i], swX + swW / 2, swY + 17);
         }
 
         // Tactile Keybindings Console
-        int kbx = 120, kby = 320, kbw = 720, kbh = 148;
+        int kbx = 120, kby = 330, kbw = 720, kbh = 145;
         g.setColor(new Color(22, 20, 28));
         g.fillRoundRect(kbx, kby, kbw, kbh, 8, 8);
         g.setColor(new Color(85, 75, 68));
@@ -2890,17 +3159,17 @@ public class GamePanel extends JPanel {
 
         g.setFont(new Font("Monospaced", Font.BOLD, 11));
         g.setColor(new Color(231, 190, 105));
-        drawCentered(g, "KEYBOARD & HEIST CONTROLS", kbx + kbw / 2, kby + 22);
+        drawCentered(g, "KEYBOARD & HEIST CONTROLS", kbx + kbw / 2, kby + 20);
 
         // Cheatsheet items
         String[][] controls = {
             {"[WASD / ARROWS]", "Move Operative"},
             {"[SHIFT / R]", "Sprint (Fast, Loud)"},
             {"[CTRL / C]", "Sneak (Silent Footsteps)"},
-            {"[E]", "Forge, Swap & Hide"},
+            {"[E]", "Forge, Swap, Steal & Hide"},
             {"[Q]", "Throw Distraction Coin"},
+            {"[G]", "Deploy Smoke Screen"},
             {"[P / ESC]", "Pause / Back"},
-            {"[M]", "Mute Sound"},
             {"[F11]", "Toggle Fullscreen"}
         };
 
@@ -2908,7 +3177,7 @@ public class GamePanel extends JPanel {
             int col = c / 4;
             int r = c % 4;
             int cx = kbx + 30 + col * 350;
-            int cy = kby + 48 + r * 24;
+            int cy = kby + 44 + r * 23;
 
             g.setFont(new Font("Monospaced", Font.BOLD, 10));
             g.setColor(new Color(255, 220, 140));
@@ -3599,14 +3868,29 @@ public class GamePanel extends JPanel {
         int timeVal = lastResult != null ? lastResult.getTimeRemaining() : 60;
         int elapsedVal = lastResult != null ? lastResult.getElapsedSeconds() : 45;
 
+        int stolenLoot = lastResult != null ? lastResult.getStolenLoot() : 0;
+        int totalLoot = lastResult != null ? lastResult.getTotalLoot() : 0;
+        int bonusLoot = lastResult != null ? lastResult.getBonusLoot() : 0;
+        int lootR = lastResult != null ? lastResult.getLootReward() : 0;
+
         g.drawString("EXHIBITS SECURED", dosX + 14, rowY);
         g.drawString(stolenCount + "/" + targetCount + " SWAPPED", dosX + dosW - 95, rowY);
-        rowY += 17;
+        rowY += 15;
 
         g.drawString("FORGERY MATCH", dosX + 14, rowY);
         g.setColor(avgAcc >= 85 ? new Color(25, 120, 50) : avgAcc >= 70 ? new Color(160, 110, 20) : new Color(160, 40, 30));
         g.drawString(avgAcc + "% [C:" + colorAcc + " S:" + shapeAcc + " P:" + posAcc + "]", dosX + dosW - 130, rowY);
-        rowY += 17;
+        rowY += 15;
+
+        g.setColor(new Color(55, 48, 42));
+        g.drawString("VALUABLES LOOTED", dosX + 14, rowY);
+        if (totalLoot > 0) {
+            g.setColor(stolenLoot == totalLoot ? new Color(25, 120, 50) : new Color(180, 120, 30));
+            g.drawString(stolenLoot + "/" + totalLoot + " ($" + bonusLoot + ")", dosX + dosW - 105, rowY);
+        } else {
+            g.drawString("NONE IN WING", dosX + dosW - 95, rowY);
+        }
+        rowY += 15;
 
         g.setColor(new Color(55, 48, 42));
         g.drawString("STEALTH STATUS", dosX + 14, rowY);
@@ -3617,12 +3901,12 @@ public class GamePanel extends JPanel {
             g.setColor(new Color(160, 50, 40));
             g.drawString(alertVal + " DETECTION(S)", dosX + dosW - 105, rowY);
         }
-        rowY += 17;
+        rowY += 15;
 
         g.setColor(new Color(55, 48, 42));
         g.drawString("TIME ELAPSED", dosX + 14, rowY);
         g.drawString(elapsedVal + "s (" + timeVal + "s left)", dosX + dosW - 115, rowY);
-        rowY += 17;
+        rowY += 15;
 
         g.drawString("BONUS BREAKDOWN", dosX + 14, rowY);
         int baseR = lastResult != null ? lastResult.getBaseReward() : 15;
@@ -3630,8 +3914,9 @@ public class GamePanel extends JPanel {
         int stR = lastResult != null ? lastResult.getStealthBonus() : 15;
         int tmR = lastResult != null ? lastResult.getTimeBonus() : 5;
         g.setColor(new Color(30, 100, 50));
-        g.drawString("+" + baseR + "B +" + accR + "A +" + stR + "S +" + tmR + "T", dosX + dosW - 125, rowY);
-        rowY += 18;
+        String bonusStr = "+" + baseR + "B +" + accR + "A +" + stR + "S +" + tmR + "T" + (lootR > 0 ? " +" + lootR + "L" : "");
+        g.drawString(bonusStr, dosX + dosW - 145, rowY);
+        rowY += 16;
 
         g.setColor(new Color(35, 30, 25));
         g.setFont(new Font("Monospaced", Font.BOLD, 11));
@@ -3887,9 +4172,11 @@ public class GamePanel extends JPanel {
             return variants[outfitIndex];
         }
         int[] targetRgb = switch (outfitIndex) {
-            case 1 -> new int[]{208, 66, 72};   // Crimson Phantom
-            case 2 -> new int[]{64, 178, 114};  // Emerald Forger
-            default -> new int[]{226, 182, 74}; // Gilded Master
+            case 1 -> new int[]{55, 110, 190};  // Museum Staff Disguise
+            case 2 -> new int[]{195, 45, 65};   // Formal Suit
+            case 3 -> new int[]{42, 145, 95};   // Dark Stealth Outfit
+            case 4 -> new int[]{215, 170, 75};  // Casual Outfit
+            default -> new int[]{226, 182, 74};
         };
         int w = src.getWidth();
         int h = src.getHeight();
@@ -3917,6 +4204,74 @@ public class GamePanel extends JPanel {
         }
         variants[outfitIndex] = tinted;
         return tinted;
+    }
+
+    private void drawPlayerAccessory(Graphics2D g, int x, int y, int width, int height, int accessoryIndex, int dirRow) {
+        if (accessoryIndex <= 0) return;
+        // dirRow: 0 = down, 1 = up, 2 = left, 3 = right
+        int headX = x + width / 2;
+        int headY = y + 16;
+        switch (accessoryIndex) {
+            case 1 -> { // Burglar Mask
+                if (dirRow != 1) {
+                    g.setColor(new Color(20, 20, 25));
+                    int mx = dirRow == 2 ? headX - 10 : dirRow == 3 ? headX - 4 : headX - 8;
+                    g.fillRoundRect(mx, headY + 2, 14, 5, 2, 2);
+                    g.setColor(Color.WHITE);
+                    if (dirRow == 0) {
+                        g.fillRect(mx + 2, headY + 3, 2, 2);
+                        g.fillRect(mx + 8, headY + 3, 2, 2);
+                    } else if (dirRow == 2) {
+                        g.fillRect(mx + 2, headY + 3, 2, 2);
+                    } else {
+                        g.fillRect(mx + 8, headY + 3, 2, 2);
+                    }
+                }
+            }
+            case 2 -> { // Gold Monocle
+                if (dirRow == 0 || dirRow == 3) {
+                    int ex = dirRow == 0 ? headX + 3 : headX + 2;
+                    g.setColor(new Color(255, 215, 0));
+                    g.drawOval(ex, headY + 2, 5, 5);
+                    g.setColor(new Color(180, 230, 255, 180));
+                    g.fillOval(ex + 1, headY + 3, 3, 3);
+                    g.setColor(new Color(255, 215, 0));
+                    g.drawLine(ex + 4, headY + 6, ex + 5, headY + 14);
+                }
+            }
+            case 3 -> { // Velvet Beret
+                int bx = headX - 9;
+                int by = headY - 8;
+                g.setColor(new Color(160, 30, 50));
+                g.fillOval(bx, by, 18, 7);
+                g.setColor(new Color(220, 50, 70));
+                g.fillOval(bx + 3, by, 12, 4);
+                g.setColor(new Color(255, 215, 0));
+                g.fillRect(bx + 8, by - 2, 2, 2);
+            }
+            case 4 -> { // Tactical Visor
+                if (dirRow != 1) {
+                    int vx = dirRow == 2 ? headX - 10 : dirRow == 3 ? headX - 4 : headX - 8;
+                    g.setColor(new Color(40, 45, 50));
+                    g.fillRect(vx - 1, headY + 1, 16, 5);
+                    g.setColor(new Color(0, 255, 210));
+                    g.fillRect(vx, headY + 2, 14, 3);
+                    g.setColor(new Color(200, 255, 250));
+                    g.drawLine(vx + 2, headY + 3, vx + 10, headY + 3);
+                }
+            }
+            case 5 -> { // Canvas Satchel
+                g.setColor(new Color(110, 75, 45));
+                g.setStroke(new BasicStroke(2.0f));
+                g.drawLine(headX - 6, headY + 8, headX + 6, headY + 22);
+                g.setStroke(new BasicStroke(1.0f));
+                g.setColor(new Color(145, 95, 55));
+                int sx = dirRow == 2 ? headX - 10 : headX + 2;
+                g.fillRoundRect(sx, headY + 18, 10, 9, 2, 2);
+                g.setColor(new Color(255, 215, 0));
+                g.fillRect(sx + 3, headY + 20, 4, 3);
+            }
+        }
     }
 
     private void drawImageButton(Graphics2D g, BufferedImage sprite, Rectangle bounds, String fallbackLabel, boolean highlighted) {

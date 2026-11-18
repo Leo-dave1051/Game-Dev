@@ -44,6 +44,8 @@ public final class GameWorld {
     private boolean gameOver;
     private boolean won;
     private int detectionIncidents;
+    private int stolenLootCount;
+    private int bonusLootMoney;
     private double copySpeedMultiplier = 1.0;
     private double throwRange = 190.0;
     private double switchDisableSeconds = 12.0;
@@ -160,6 +162,14 @@ public final class GameWorld {
             SoundEffects.play(SoundEffects.Cue.HIDE);
             showMessage("Hidden. Guards cannot see you here.", 2.0);
             moving = false;
+        } else if (interactPressed && getNearbyLoot() != null) {
+            MuseumLoot nearLoot = getNearbyLoot();
+            nearLoot.collect();
+            stolenLootCount++;
+            bonusLootMoney += nearLoot.getValue();
+            interactPressed = false;
+            SoundEffects.play(SoundEffects.Cue.CLICK);
+            showMessage("COLLECTED: " + nearLoot.getName() + " (+$" + nearLoot.getValue() + ")", 2.2);
         } else {
             if (interactPressed && map.activateNearbySwitch(
                 getPlayerCenterX(), getPlayerCenterY(), switchDisableSeconds)) {
@@ -650,8 +660,26 @@ public final class GameWorld {
     public int getElapsedSeconds() { return (int) elapsed; }
     public MuseumLevel getLevel() { return map.getLevel(); }
     public int getTargetCount() { return map.getPaintingCount(); }
+    public MuseumLoot getNearbyLoot() {
+        Rectangle pb = playerBounds();
+        for (MuseumLoot item : map.getLoot()) {
+            if (!item.isCollected() && item.getInteractionBounds().intersects(pb)) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    public boolean isNearLoot(MuseumLoot item) {
+        return item != null && !item.isCollected() && item.getInteractionBounds().intersects(playerBounds());
+    }
+
+    public int getStolenLootCount() { return stolenLootCount; }
+    public int getTotalLootCount() { return map.getLoot().size(); }
+    public int getBonusLootMoney() { return bonusLootMoney; }
+
     public int getScorePreview() {
-        return timeLeft * 15 + getStolenCount() * 400 + Math.max(0, 100 - getSuspicion()) * 5
+        return timeLeft * 15 + getStolenCount() * 400 + bonusLootMoney * 2 + Math.max(0, 100 - getSuspicion()) * 5
             + (detectionIncidents == 0 ? 500 : 0);
     }
 
@@ -677,6 +705,8 @@ public final class GameWorld {
         if (!message.isEmpty()) return message;
         if (hidingIn != null) return "E  EXIT " + hidingIn.getName().toUpperCase() + "  (OR MOVE TO STEP OUT)";
         if (nearbyHideSpot != null) return "E  HIDE IN " + nearbyHideSpot.getName().toUpperCase();
+        MuseumLoot nearLoot = getNearbyLoot();
+        if (nearLoot != null) return "E  STEAL " + nearLoot.getName().toUpperCase() + "  (+$" + nearLoot.getValue() + ")";
         if (nearbySecretPassage != null) {
             if (nearbySecretPassage.isDiscovered()) return "HIDDEN ROUTE: " + nearbySecretPassage.getName().toUpperCase()
                 + "  -  WALK INTO THE BOOKCASE";

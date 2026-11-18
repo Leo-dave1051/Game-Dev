@@ -32,12 +32,17 @@ public final class MuseumLevel {
     private final Point playerStart;
     private final int missionSeconds;
 
+    private final int mapWidth;
+    private final int mapHeight;
+    private final List<MuseumLoot> loot;
+
     private MuseumLevel(int id, String name, String difficulty, String challenge,
-                        Color floorA, Color floorB, int missionSeconds,
+                        Color floorA, Color floorB, int missionSeconds, int mapWidth, int mapHeight,
                         Point playerStart, List<Rectangle> walls, List<Rectangle> cases,
                         List<Rectangle> benches, List<Rectangle> statues, List<Rectangle> lasers,
                         List<Rectangle> switches, List<Point> exits, List<Point> paintingPositions,
-                        List<String> paintingNames, List<GuardRoute> guards, List<HideSpotData> hideSpots) {
+                        List<String> paintingNames, List<GuardRoute> guards, List<HideSpotData> hideSpots,
+                        List<MuseumLoot> loot) {
         this.id = id;
         this.name = name;
         this.difficulty = difficulty;
@@ -45,6 +50,8 @@ public final class MuseumLevel {
         this.floorA = floorA;
         this.floorB = floorB;
         this.missionSeconds = missionSeconds;
+        this.mapWidth = mapWidth > 0 ? mapWidth : 960;
+        this.mapHeight = mapHeight > 0 ? mapHeight : 600;
         this.playerStart = new Point(playerStart);
         this.walls = copyRectangles(walls);
         this.cases = copyRectangles(cases);
@@ -57,9 +64,21 @@ public final class MuseumLevel {
         this.paintingNames = Collections.unmodifiableList(new ArrayList<>(paintingNames));
         this.guards = Collections.unmodifiableList(new ArrayList<>(guards));
         this.hideSpots = Collections.unmodifiableList(new ArrayList<>(hideSpots));
+        this.loot = loot != null ? Collections.unmodifiableList(new ArrayList<>(loot)) : Collections.emptyList();
         this.laserPatterns = createLaserPatterns(id, this.lasers);
         this.movableObjects = createMovableObjects(id);
         this.secretPassages = createSecretPassages(id);
+    }
+
+    private MuseumLevel(int id, String name, String difficulty, String challenge,
+                        Color floorA, Color floorB, int missionSeconds,
+                        Point playerStart, List<Rectangle> walls, List<Rectangle> cases,
+                        List<Rectangle> benches, List<Rectangle> statues, List<Rectangle> lasers,
+                        List<Rectangle> switches, List<Point> exits, List<Point> paintingPositions,
+                        List<String> paintingNames, List<GuardRoute> guards, List<HideSpotData> hideSpots) {
+        this(id, name, difficulty, challenge, floorA, floorB, missionSeconds, 960, 600,
+            playerStart, walls, cases, benches, statues, lasers, switches, exits,
+            paintingPositions, paintingNames, guards, hideSpots, Collections.emptyList());
     }
 
     public static List<MuseumLevel> all() {
@@ -75,127 +94,167 @@ public final class MuseumLevel {
         List<MuseumLevel> levels = new ArrayList<>();
 
         levels.add(new MuseumLevel(
-            0, "The Classic Gallery", "EASY", "Learn camera sweeps and move a noisy crate",
-            new Color(125, 91, 70), new Color(114, 81, 65), 150,
-            p(55, 108),
-            rects(r(24, 248, 138, 18), r(207, 248, 235, 18), r(505, 248, 230, 18), r(785, 248, 151, 18),
-                r(310, 90, 18, 72), r(310, 207, 18, 41), r(310, 266, 18, 111), r(310, 425, 18, 115),
-                r(632, 90, 18, 72), r(632, 207, 18, 41), r(632, 266, 18, 111), r(632, 425, 18, 115)),
-            rects(r(93, 173, 100, 39), r(421, 347, 110, 40)),
-            rects(r(44, 294, 52, 23)),
-            rects(),
+            0, "The Classic Gallery", "EASY", "Explore the rooms, secure the clock & donation box, and forge the Mona Lisa",
+            new Color(125, 91, 70), new Color(114, 81, 65), 240, 1360, 800,
+            p(55, 680),
+            rects(
+                r(24, 460, 280, 20), r(400, 460, 280, 20),
+                r(700, 70, 20, 200), r(700, 360, 20, 400),
+                r(980, 70, 20, 280), r(980, 460, 20, 300),
+                r(240, 190, 20, 150), r(480, 190, 20, 150)
+            ),
+            rects(r(120, 280, 90, 40), r(360, 280, 100, 40), r(820, 220, 90, 40)),
+            rects(r(80, 560, 60, 24), r(480, 560, 60, 24), r(820, 560, 60, 24)),
+            rects(r(350, 490, 26, 36)),
             rects(), rects(),
-            points(p(42, 474)),
-            points(p(112, 112)),
-            strings("Moonlit Orchard"),
-            routes(route("Gallery Guard", 188, 118, 72, p(188, 118), p(270, 118), p(260, 204), p(62, 218))),
-            hides(hide("Gallery wardrobe", 250, 316, 44, 52), hide("Storage cabinet", 680, 431, 46, 52))
+            points(p(42, 700), p(1280, 700)),
+            points(p(340, 110)),
+            strings("Mona Lisa"),
+            routes(
+                route("Gallery Guard", 188, 180, 72, p(188, 180), p(520, 180), p(520, 380), p(188, 380)),
+                route("Workshop Guard", 840, 480, 70, p(840, 480), p(1220, 480), p(1220, 640), p(840, 640))
+            ),
+            hides(hide("Gallery wardrobe", 220, 380, 46, 52), hide("Workshop cabinet", 880, 380, 46, 52), hide("Storage locker", 1180, 620, 46, 52)),
+            lootItems(
+                new MuseumLoot(1, "Museum Donation Box", MuseumLoot.LootType.DONATION_BOX, 240, 640, 180),
+                new MuseumLoot(2, "Antique Silver Clock", MuseumLoot.LootType.CLOCK, 1080, 180, 250)
+            )
         ));
 
         levels.add(new MuseumLevel(
-            1, "The Grand Museum", "MEDIUM", "A sweeping camera watches the connected exhibition halls",
-            new Color(132, 127, 119), new Color(112, 111, 108), 190,
-            p(55, 108),
-            rects(r(295, 90, 18, 118), r(295, 252, 18, 112), r(295, 407, 18, 133),
-                r(638, 90, 18, 75), r(638, 207, 18, 137), r(638, 386, 18, 154),
-                r(24, 267, 140, 18), r(210, 267, 210, 18), r(482, 267, 210, 18), r(755, 267, 181, 18)),
-            rects(r(82, 158, 88, 42), r(362, 151, 104, 38), r(705, 151, 100, 38),
-                r(113, 350, 104, 39), r(397, 345, 104, 39), r(704, 350, 104, 39)),
-            rects(r(55, 300, 58, 24), r(840, 308, 52, 23), r(480, 456, 58, 22)),
-            rects(r(534, 316, 26, 34)),
+            1, "The Grand Museum", "MEDIUM", "Interconnected exhibition wings, cameras, and the starry night masterpiece",
+            new Color(132, 127, 119), new Color(112, 111, 108), 280, 1560, 900,
+            p(55, 780),
+            rects(
+                r(420, 70, 20, 260), r(420, 440, 20, 420),
+                r(1120, 70, 20, 260), r(1120, 440, 20, 420),
+                r(24, 420, 180, 20), r(270, 420, 150, 20),
+                r(1140, 420, 180, 20), r(1380, 420, 150, 20),
+                r(680, 220, 160, 20)
+            ),
+            rects(r(120, 220, 90, 40), r(580, 240, 100, 40), r(880, 240, 100, 40), r(1260, 220, 90, 40),
+                r(160, 600, 100, 40), r(620, 640, 120, 40), r(820, 640, 120, 40), r(1260, 600, 100, 40)),
+            rects(r(80, 340, 60, 24), r(1380, 340, 60, 24), r(740, 760, 80, 24)),
+            rects(r(760, 460, 36, 48), r(540, 520, 28, 36), r(980, 520, 28, 36)),
             rects(), rects(),
-            points(p(42, 474), p(880, 474)),
-            points(p(91, 110), p(437, 110), p(742, 110)),
-            strings("The First Light", "Marble Garden", "Portrait in Blue"),
+            points(p(42, 780), p(1480, 780)),
+            points(p(740, 110), p(220, 110), p(1320, 110)),
+            strings("The Starry Night", "Marble Garden", "Portrait in Blue"),
             routes(
-                route("West Wing Guard", Guard.GuardType.REGULAR, 196, 115, 75, p(196, 115), p(268, 115), p(268, 230), p(54, 230)),
-                route("East Wing Guard", Guard.GuardType.REGULAR, 780, 304, 70, p(780, 304), p(880, 304), p(880, 430), p(680, 430)),
-                route("Grand Hall Supervisor", Guard.GuardType.SUPERVISOR, 430, 444, 72, p(430, 444), p(594, 444), p(594, 505), p(350, 505))
+                route("West Wing Guard", Guard.GuardType.REGULAR, 160, 260, 75, p(160, 260), p(340, 260), p(340, 680), p(160, 680)),
+                route("East Wing Guard", Guard.GuardType.REGULAR, 1220, 260, 72, p(1220, 260), p(1440, 260), p(1440, 680), p(1220, 680)),
+                route("Grand Hall Supervisor", Guard.GuardType.SUPERVISOR, 560, 360, 74, p(560, 360), p(980, 360), p(980, 740), p(560, 740))
             ),
-            hides(hide("West wardrobe", 220, 318, 46, 52), hide("Restoration cabinet", 674, 430, 46, 52),
-                hide("East locker", 868, 395, 44, 50))
+            hides(hide("West wardrobe", 220, 340, 46, 52), hide("Restoration cabinet", 1280, 340, 46, 52),
+                hide("East locker", 1420, 560, 44, 50)),
+            lootItems(
+                new MuseumLoot(3, "Gilded Chalice", MuseumLoot.LootType.CHALICE, 240, 540, 350),
+                new MuseumLoot(4, "Antique Gold Clock", MuseumLoot.LootType.CLOCK, 1340, 220, 280),
+                new MuseumLoot(5, "Atrium Donation Vault", MuseumLoot.LootType.DONATION_BOX, 760, 800, 180)
+            )
         ));
 
         levels.add(new MuseumLevel(
-            2, "The Royal Exhibition", "HARD", "Read the laser cycle, distract guards, or find a secret route",
-            new Color(108, 66, 64), new Color(82, 50, 57), 220,
-            p(55, 108),
-            rects(r(255, 90, 20, 78), r(255, 310, 20, 62),
-                r(685, 90, 20, 72), r(685, 315, 20, 58),
-                r(24, 250, 145, 18), r(738, 250, 198, 18),
-                r(444, 90, 18, 51), r(444, 445, 18, 82)),
-            rects(r(92, 161, 98, 40), r(342, 153, 98, 40), r(738, 155, 110, 40),
-                r(105, 350, 110, 40), r(535, 354, 105, 40), r(780, 350, 104, 40)),
-            rects(r(52, 300, 52, 23), r(862, 303, 52, 23)),
-            rects(r(566, 111, 28, 36), r(574, 431, 32, 38), r(347, 433, 30, 34)),
-            rects(r(478, 288, 8, 118)),
-            rects(r(466, 434, 38, 28)),
-            points(p(42, 474)),
-            points(p(115, 110), p(371, 110), p(765, 110), p(545, 472)),
-            strings("The Crown's Reflection", "Gilded Promise", "Queen at Dusk", "The Royal Seal"),
-            routes(
-                route("West Sentinel", Guard.GuardType.ELITE, 180, 118, 80, p(180, 118), p(238, 118), p(238, 220), p(58, 220)),
-                route("Royal Guard", Guard.GuardType.REGULAR, 740, 304, 75, p(740, 304), p(890, 304), p(890, 440), p(720, 440)),
-                route("Throne Room Supervisor", Guard.GuardType.SUPERVISOR, 520, 440, 78, p(520, 440), p(635, 440), p(635, 500), p(490, 500)),
-                route("Curator Vance", Guard.GuardType.CURATOR, 510, 118, 70, p(510, 118), p(640, 118), p(640, 220), p(480, 220))
+            2, "The Royal Exhibition", "HARD", "Throne treasury, timed lasers, secret passages, and the pearl earring",
+            new Color(108, 66, 64), new Color(82, 50, 57), 320, 1680, 960,
+            p(55, 840),
+            rects(
+                r(380, 70, 20, 320), r(380, 520, 20, 380),
+                r(1240, 70, 20, 320), r(1240, 520, 20, 380),
+                r(24, 460, 160, 20), r(240, 460, 140, 20),
+                r(740, 70, 20, 280), r(740, 480, 20, 420),
+                r(760, 480, 480, 20)
             ),
-            hides(hide("Royal wardrobe", 205, 316, 44, 50), hide("Servants' cabinet", 726, 434, 44, 48))
+            rects(r(100, 220, 100, 40), r(480, 220, 120, 40), r(920, 220, 120, 40), r(1380, 220, 100, 40),
+                r(120, 620, 100, 40), r(500, 680, 120, 40), r(900, 680, 120, 40), r(1400, 620, 100, 40)),
+            rects(r(80, 380, 60, 24), r(1480, 380, 60, 24)),
+            rects(r(560, 380, 32, 42), r(1020, 380, 32, 42)),
+            rects(r(1040, 490, 8, 140)),
+            rects(r(1020, 680, 38, 28)),
+            points(p(42, 840), p(1600, 840)),
+            points(p(560, 110), p(980, 110), p(220, 110), p(1440, 110)),
+            strings("Girl with a Pearl Earring", "Gilded Promise", "Queen at Dusk", "The Royal Seal"),
+            routes(
+                route("West Sentinel", Guard.GuardType.ELITE, 180, 220, 80, p(180, 220), p(320, 220), p(320, 740), p(180, 740)),
+                route("Royal Guard", Guard.GuardType.REGULAR, 1320, 220, 75, p(1320, 220), p(1540, 220), p(1540, 740), p(1320, 740)),
+                route("Throne Room Supervisor", Guard.GuardType.SUPERVISOR, 520, 440, 78, p(520, 440), p(680, 440), p(680, 780), p(520, 780)),
+                route("Curator Vance", Guard.GuardType.CURATOR, 860, 220, 70, p(860, 220), p(1140, 220), p(1140, 420), p(860, 420))
+            ),
+            hides(hide("Royal wardrobe", 220, 380, 44, 50), hide("Servants' cabinet", 840, 520, 44, 48), hide("East locker", 1440, 480, 44, 50)),
+            lootItems(
+                new MuseumLoot(6, "Royal Sapphire Diamond", MuseumLoot.LootType.DIAMOND, 1120, 540, 600),
+                new MuseumLoot(7, "Gilded Chalice", MuseumLoot.LootType.CHALICE, 240, 260, 380),
+                new MuseumLoot(8, "Velvet Donation Box", MuseumLoot.LootType.DONATION_BOX, 620, 820, 200)
+            )
         ));
 
         levels.add(new MuseumLevel(
-            3, "The Museum of Ancient Art", "HARD", "Timed lasers, moving cover, and a hidden pillar passage",
-            new Color(123, 108, 83), new Color(105, 91, 72), 230,
-            p(55, 108),
-            rects(r(218, 90, 18, 76), r(218, 300, 18, 66),
-                r(492, 90, 18, 71), r(492, 298, 18, 68),
-                r(756, 90, 18, 85), r(756, 307, 18, 70),
-                r(295, 355, 18, 70), r(382, 355, 18, 70), r(579, 355, 18, 70)),
-            rects(r(83, 151, 92, 39), r(336, 145, 98, 41), r(576, 152, 100, 39), r(812, 148, 92, 41),
-                r(80, 352, 97, 40), r(343, 450, 98, 40), r(656, 448, 98, 40)),
-            rects(r(42, 293, 56, 23), r(850, 298, 54, 23)),
-            rects(r(270, 292, 34, 45), r(410, 292, 34, 45), r(535, 294, 36, 44),
-                r(650, 290, 34, 44), r(463, 445, 35, 44)),
-            rects(r(625, 277, 8, 98), r(625, 424, 8, 98)),
-            rects(r(606, 438, 38, 26)),
-            points(p(42, 474), p(880, 474)),
-            points(p(100, 108), p(353, 106), p(593, 108), p(829, 108), p(100, 430)),
-            strings("Burial at Dawn", "The Bronze Oracle", "Amber Dynasty", "River of Kings", "Hidden Pharaoh"),
-            routes(
-                route("Antiquities Guard", Guard.GuardType.REGULAR, 150, 112, 70, p(150, 112), p(195, 112), p(195, 214), p(55, 214)),
-                route("Pillar Hall Elite", Guard.GuardType.ELITE, 535, 130, 78, p(535, 130), p(730, 130), p(730, 218), p(530, 218)),
-                route("Lower Gallery Supervisor", Guard.GuardType.SUPERVISOR, 420, 510, 74, p(420, 510), p(570, 510), p(570, 442), p(330, 510)),
-                route("East Sentinel", Guard.GuardType.ELITE, 795, 310, 78, p(795, 310), p(900, 310), p(900, 432), p(795, 432))
+            3, "The Museum of Ancient Art", "HARD", "Pharaoh's tomb, antiquities pillar hall, moving urns, and the great wave",
+            new Color(123, 108, 83), new Color(105, 91, 72), 340, 1780, 1020,
+            p(55, 900),
+            rects(
+                r(440, 70, 20, 340), r(440, 540, 20, 420),
+                r(1320, 70, 20, 340), r(1320, 540, 20, 420),
+                r(24, 480, 180, 20), r(260, 480, 180, 20),
+                r(880, 70, 20, 300), r(880, 500, 20, 460)
             ),
-            hides(hide("Dig storeroom", 245, 441, 46, 52), hide("Artifact cabinet", 692, 438, 44, 52))
+            rects(r(120, 220, 100, 40), r(560, 220, 120, 40), r(1020, 220, 120, 40), r(1460, 220, 100, 40),
+                r(140, 660, 100, 40), r(580, 700, 120, 40), r(1040, 700, 120, 40), r(1480, 660, 100, 40)),
+            rects(r(80, 380, 60, 24), r(1560, 380, 60, 24)),
+            rects(r(620, 400, 34, 46), r(1100, 400, 34, 46), r(760, 620, 34, 46)),
+            rects(r(1140, 480, 8, 120)),
+            rects(r(1120, 680, 38, 26)),
+            points(p(42, 900), p(1680, 900)),
+            points(p(640, 110), p(1080, 110), p(220, 110), p(1520, 110)),
+            strings("The Great Wave off Kanagawa", "The Bronze Oracle", "Amber Dynasty", "River of Kings", "Hidden Pharaoh"),
+            routes(
+                route("Antiquities Guard", Guard.GuardType.REGULAR, 200, 240, 70, p(200, 240), p(380, 240), p(380, 780), p(200, 780)),
+                route("Pillar Hall Elite", Guard.GuardType.ELITE, 580, 240, 78, p(580, 240), p(820, 240), p(820, 800), p(580, 800)),
+                route("Lower Gallery Supervisor", Guard.GuardType.SUPERVISOR, 940, 340, 74, p(940, 340), p(1240, 340), p(1240, 800), p(940, 800)),
+                route("East Sentinel", Guard.GuardType.ELITE, 1400, 240, 78, p(1400, 240), p(1640, 240), p(1640, 780), p(1400, 780))
+            ),
+            hides(hide("Dig storeroom", 260, 380, 46, 52), hide("Artifact cabinet", 980, 520, 44, 52), hide("Tomb locker", 1520, 480, 44, 52)),
+            lootItems(
+                new MuseumLoot(9, "Golden Chalice", MuseumLoot.LootType.CHALICE, 1200, 520, 420),
+                new MuseumLoot(10, "Ancient Papyrus Scroll", MuseumLoot.LootType.SCROLL, 280, 640, 320),
+                new MuseumLoot(11, "Carved Jade Clock", MuseumLoot.LootType.CLOCK, 1540, 260, 300)
+            )
         ));
 
         levels.add(new MuseumLevel(
-            4, "The National Art Museum", "VERY HARD", "Cameras, laser checkpoints, movable cover, and a secret route",
-            new Color(94, 111, 119), new Color(76, 91, 101), 250,
-            p(55, 108),
-            rects(r(190, 90, 16, 72), r(190, 315, 16, 64),
-                r(386, 90, 16, 62), r(386, 310, 16, 68),
-                r(582, 90, 16, 78), r(582, 313, 16, 66),
-                r(778, 90, 16, 72), r(778, 315, 16, 64),
-                r(265, 333, 16, 74), r(460, 333, 16, 74), r(655, 333, 16, 74)),
-            rects(r(72, 152, 84, 36), r(231, 153, 84, 36), r(425, 151, 84, 36),
-                r(620, 151, 84, 36), r(816, 151, 84, 36),
-                r(77, 369, 86, 36), r(297, 452, 86, 36), r(500, 452, 86, 36), r(817, 367, 86, 36)),
-            rects(r(49, 283, 48, 21), r(849, 283, 48, 21), r(454, 454, 42, 19)),
-            rects(r(307, 278, 30, 40), r(503, 277, 30, 40), r(700, 278, 30, 40)),
-            rects(r(604, 288, 8, 115), r(604, 426, 8, 105)),
-            rects(r(627, 438, 38, 25)),
-            points(p(42, 474), p(880, 474)),
-            points(p(95, 107), p(255, 107), p(449, 107), p(644, 107), p(838, 107)),
-            strings("Signal in Silver", "New City", "After the Rain", "Glass Horizon", "The Last Original"),
-            routes(
-                route("North Elite", Guard.GuardType.ELITE, 120, 110, 80, p(120, 110), p(174, 110), p(174, 205), p(42, 205)),
-                route("Modern East Sentinel", Guard.GuardType.ELITE, 810, 294, 82, p(810, 294), p(906, 294), p(906, 426), p(810, 426)),
-                route("Sculpture Hall Supervisor", Guard.GuardType.SUPERVISOR, 300, 420, 80, p(300, 420), p(560, 420), p(560, 510), p(280, 510)),
-                route("Upper Security Elite", Guard.GuardType.ELITE, 418, 282, 80, p(418, 282), p(556, 282), p(556, 320), p(418, 320)),
-                route("West Wing Guard", Guard.GuardType.REGULAR, 42, 315, 74, p(42, 315), p(170, 315), p(170, 410), p(42, 410))
+            4, "The National Art Museum", "VERY HARD", "High-security matrix, sweeping cameras, multiple alarms, and the scream",
+            new Color(94, 111, 119), new Color(76, 91, 101), 380, 1920, 1120,
+            p(55, 1000),
+            rects(
+                r(480, 70, 20, 360), r(480, 580, 20, 480),
+                r(1440, 70, 20, 360), r(1440, 580, 20, 480),
+                r(24, 520, 200, 20), r(280, 520, 200, 20),
+                r(960, 70, 20, 340), r(960, 540, 20, 520),
+                r(980, 540, 460, 20)
             ),
-            hides(hide("Staff locker", 214, 434, 42, 48), hide("Maintenance cabinet", 718, 437, 42, 48))
+            rects(r(140, 240, 100, 40), r(620, 240, 120, 40), r(1120, 240, 120, 40), r(1600, 240, 100, 40),
+                r(160, 720, 100, 40), r(640, 760, 120, 40), r(1140, 760, 120, 40), r(1620, 720, 100, 40)),
+            rects(r(80, 420, 60, 24), r(1720, 420, 60, 24)),
+            rects(r(680, 420, 36, 48), r(1220, 420, 36, 48)),
+            rects(r(1280, 540, 8, 140)),
+            rects(r(1260, 760, 38, 28)),
+            points(p(42, 1000), p(1820, 1000)),
+            points(p(720, 110), p(1200, 110), p(240, 110), p(1680, 110)),
+            strings("The Scream", "New City", "After the Rain", "Glass Horizon", "The Last Original"),
+            routes(
+                route("North Elite", Guard.GuardType.ELITE, 220, 240, 80, p(220, 240), p(420, 240), p(420, 860), p(220, 860)),
+                route("Modern East Sentinel", Guard.GuardType.ELITE, 1500, 240, 82, p(1500, 240), p(1780, 240), p(1780, 860), p(1500, 860)),
+                route("Sculpture Hall Supervisor", Guard.GuardType.SUPERVISOR, 600, 380, 80, p(600, 380), p(900, 380), p(900, 860), p(600, 860)),
+                route("Upper Security Elite", Guard.GuardType.ELITE, 1040, 240, 82, p(1040, 240), p(1360, 240), p(1360, 480), p(1040, 480)),
+                route("West Wing Guard", Guard.GuardType.REGULAR, 80, 600, 74, p(80, 600), p(380, 600), p(380, 960), p(80, 960))
+            ),
+            hides(hide("Staff locker", 280, 440, 44, 52), hide("Maintenance cabinet", 1060, 440, 44, 52), hide("Vault locker", 1680, 520, 44, 52)),
+            lootItems(
+                new MuseumLoot(12, "Flawless Diamond Exhibit", MuseumLoot.LootType.DIAMOND, 1340, 580, 750),
+                new MuseumLoot(13, "Imperial Gold Clock", MuseumLoot.LootType.CLOCK, 340, 280, 400),
+                new MuseumLoot(14, "Platinum Chalice", MuseumLoot.LootType.CHALICE, 1680, 280, 500),
+                new MuseumLoot(15, "Executive Donation Vault", MuseumLoot.LootType.DONATION_BOX, 740, 880, 250)
+            )
         ));
         return Collections.unmodifiableList(levels);
     }
@@ -207,6 +266,7 @@ public final class MuseumLevel {
     private static List<String> strings(String... values) { return Arrays.asList(values); }
     private static List<GuardRoute> routes(GuardRoute... values) { return Arrays.asList(values); }
     private static List<HideSpotData> hides(HideSpotData... values) { return Arrays.asList(values); }
+    private static List<MuseumLoot> lootItems(MuseumLoot... values) { return Arrays.asList(values); }
 
     private static List<LaserBarrier.Data> createLaserPatterns(int levelId, List<Rectangle> lasers) {
         List<LaserBarrier.Data> patterns = new ArrayList<>();
@@ -323,6 +383,9 @@ public final class MuseumLevel {
     public List<MovableObject.Data> getMovableObjects() { return movableObjects; }
     public List<SecretPassage.Data> getSecretPassages() { return secretPassages; }
     public int getPaintingCount() { return paintingPositions.size(); }
+    public int getMapWidth() { return mapWidth; }
+    public int getMapHeight() { return mapHeight; }
+    public List<MuseumLoot> getLoot() { return loot; }
     public List<CameraData> getCameras() {
         switch (id) {
             case 0:

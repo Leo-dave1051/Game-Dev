@@ -32,6 +32,7 @@ public final class MuseumMap {
     private final List<LaserBarrier> laserBarriers = new ArrayList<>();
     private final List<MovableObject> movableObjects = new ArrayList<>();
     private final List<SecretPassage> secretPassages = new ArrayList<>();
+    private final List<MuseumLoot> loot = new ArrayList<>();
     private BufferedImage staticLayer;
     private double securityDisabledSeconds;
 
@@ -39,12 +40,22 @@ public final class MuseumMap {
         this(MuseumLevel.get(0));
     }
 
+    public int getWidth() {
+        return level != null ? level.getMapWidth() : WIDTH;
+    }
+
+    public int getHeight() {
+        return level != null ? level.getMapHeight() : HEIGHT;
+    }
+
     public MuseumMap(MuseumLevel level) {
         this.level = level;
-        addWall(0, 65, WIDTH, 25);
-        addWall(0, 90, 24, 450);
-        addWall(936, 90, 24, 450);
-        addWall(0, 540, WIDTH, 60);
+        int mapW = getWidth();
+        int mapH = getHeight();
+        addWall(0, 50, mapW, 25);
+        addWall(0, 75, 24, mapH - 115);
+        addWall(mapW - 24, 75, 24, mapH - 115);
+        addWall(0, mapH - 40, mapW, 40);
         for (Rectangle wall : level.getWalls()) addWall(wall.x, wall.y, wall.width, wall.height);
         copyInto(level.getCases(), cases);
         copyInto(level.getBenches(), benches);
@@ -65,6 +76,9 @@ public final class MuseumMap {
         for (MuseumLevel.HideSpotData spot : level.getHideSpots()) {
             hideSpots.add(new HideSpot(spot.getName(), spot.getBounds()));
         }
+        for (MuseumLoot item : level.getLoot()) {
+            loot.add(new MuseumLoot(item.getId(), item.getName(), item.getType(), item.getX(), item.getY(), item.getValue()));
+        }
     }
 
     private static void copyInto(List<Rectangle> source, List<Rectangle> destination) {
@@ -79,6 +93,7 @@ public final class MuseumMap {
     public List<HideSpot> getHideSpots() { return Collections.unmodifiableList(hideSpots); }
     public List<Rectangle> getSolids() { return Collections.unmodifiableList(solids); }
     public List<Rectangle> getExits() { return Collections.unmodifiableList(exits); }
+    public List<MuseumLoot> getLoot() { return Collections.unmodifiableList(loot); }
     public Rectangle getExit() {
         return exits.isEmpty() ? new Rectangle() : new Rectangle(exits.get(0));
     }
@@ -251,13 +266,15 @@ public final class MuseumMap {
 
     /** Steps along a throw vector and stops before hitting walls or solid obstacles. */
     public Point2D.Double getThrowTarget(double startX, double startY, double dirX, double dirY, double maxDistance) {
-        double lastX = Math.max(35, Math.min(WIDTH - 35, startX));
-        double lastY = Math.max(105, Math.min(HEIGHT - 35, startY));
+        int mapW = getWidth();
+        int mapH = getHeight();
+        double lastX = Math.max(35, Math.min(mapW - 35, startX));
+        double lastY = Math.max(85, Math.min(mapH - 35, startY));
         int steps = Math.max(1, (int) Math.ceil(maxDistance / 8.0));
         for (int i = 1; i <= steps; i++) {
             double dist = maxDistance * i / steps;
-            double testX = Math.max(35, Math.min(WIDTH - 35, startX + dirX * dist));
-            double testY = Math.max(105, Math.min(HEIGHT - 35, startY + dirY * dist));
+            double testX = Math.max(35, Math.min(mapW - 35, startX + dirX * dist));
+            double testY = Math.max(85, Math.min(mapH - 35, startY + dirY * dist));
             if (!isPointInSolid(testX, testY)) {
                 lastX = testX;
                 lastY = testY;
@@ -310,8 +327,8 @@ public final class MuseumMap {
     }
 
     public List<Point> findPath(double fromX, double fromY, double toX, double toY, int actorWidth, int actorHeight) {
-        int columns = WIDTH / TILE;
-        int rows = HEIGHT / TILE;
+        int columns = getWidth() / TILE;
+        int rows = getHeight() / TILE;
         int start = nearestCell(fromX, fromY, actorWidth, actorHeight, columns, rows);
         int goal = nearestCell(toX, toY, actorWidth, actorHeight, columns, rows);
         if (start < 0 || goal < 0) return Collections.emptyList();
@@ -408,12 +425,14 @@ public final class MuseumMap {
     }
 
     private BufferedImage buildStaticLayer() {
-        BufferedImage layer = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_ARGB);
+        int mapW = getWidth();
+        int mapH = getHeight();
+        BufferedImage layer = new BufferedImage(mapW, mapH, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = layer.createGraphics();
         g.setColor(level.getFloorA().darker());
-        g.fillRect(0, 0, WIDTH, HEIGHT);
-        for (int y = 90; y < 540; y += 40) {
-            for (int x = 24; x < 936; x += 40) {
+        g.fillRect(0, 0, mapW, mapH);
+        for (int y = 75; y < mapH - 45; y += 40) {
+            for (int x = 24; x < mapW - 24; x += 40) {
                 g.setColor(((x / 40 + y / 40) & 1) == 0
                     ? level.getFloorA() : level.getFloorB());
                 g.fillRect(x, y, 40, 40);
@@ -423,8 +442,7 @@ public final class MuseumMap {
                 g.drawLine(x + 4, y + 4, x + 12, y + 4);
             }
         }
-        drawRug(g, 350, 285, 250, 86);
-        drawRug(g, 53, 425, 184, 64);
+        drawRug(g, mapW / 2 - 125, mapH / 2 - 43, 250, 86);
         drawCases(g);
         drawBenches(g);
         drawStatues(g);
