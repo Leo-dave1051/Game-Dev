@@ -103,13 +103,9 @@ public final class Guard {
                 inspectingPainting = null;
             }
 
-            // Suspicion buildup rate based on distance and player stealth: fills rapidly when in direct sight
-            double rate = distance < 45 ? 145.0 : distance < 120 ? 92.0 : 62.0;
-            if (guardType == GuardType.ELITE) rate *= 1.35;
-            if (sprinting) rate *= 2.0;
-            else if (sneaking) rate *= 0.60;
-
-            suspicion = Math.min(100.0, suspicion + rate * dt);
+            // Instantly fill overhead bar to 100% (bright red) and trigger immediate chase
+            suspicion = 100.0;
+            detectionStage = DetectionStage.CHASE;
             lostSightTimer = 0;
             goalX = playerX;
             goalY = playerY;
@@ -123,33 +119,11 @@ public final class Guard {
                 facingY = dy / dist;
             }
 
-            if (suspicion >= 100.0) {
-                detectionStage = DetectionStage.CHASE;
-                if (state != State.CHASE) {
-                    state = State.CHASE;
-                    stateTimer = 0;
-                    searchTimer = 0;
-                    setSpeechBubble("HALT! INTRUDER!", new Color(255, 60, 60), 2.2);
-                }
-            } else if (suspicion >= 92.0) {
-                detectionStage = DetectionStage.ALERT;
-                if (state != State.CHASE && state != State.ALERT) {
-                    state = State.ALERT;
-                    stateTimer = 0;
-                    setSpeechBubble("INTRUDER SPOTTED!", new Color(255, 90, 50), 1.6);
-                }
-            } else if (suspicion >= 60.0) {
-                detectionStage = DetectionStage.INVESTIGATING;
-                if (state != State.CHASE && state != State.ALERT && state != State.INSPECT) {
-                    state = State.INSPECT;
-                    stateTimer = 0;
-                    setSpeechBubble("Hey! Who's that?!", new Color(255, 160, 40), 1.8);
-                }
-            } else if (suspicion >= 25.0) {
-                detectionStage = DetectionStage.SUSPICIOUS;
-                if (state == State.PATROL) {
-                    setSpeechBubble("...?", new Color(255, 215, 80), 1.2);
-                }
+            if (state != State.CHASE) {
+                state = State.CHASE;
+                stateTimer = 0;
+                searchTimer = 0;
+                setSpeechBubble("HALT! INTRUDER!", new Color(255, 60, 60), 2.2);
             }
         } else {
             // Player is not directly visible
@@ -169,7 +143,7 @@ public final class Guard {
             } else if (state == State.INSPECT) {
                 stateTimer += dt;
                 // While investigating a sound/disturbance out of sight, the bar fills slowly
-                suspicion = Math.min(62.0, suspicion + dt * 16.0);
+                suspicion = Math.min(62.0, suspicion + dt * 10.0);
 
                 // If guard reaches suspicious spot and player is gone, investigate briefly then return
                 if (hasReachedGoal(goalX, goalY) || stateTimer >= 4.5) {
@@ -186,7 +160,7 @@ public final class Guard {
             if (suspicion >= 100.0) detectionStage = DetectionStage.CHASE;
             else if (suspicion >= 92.0) detectionStage = DetectionStage.ALERT;
             else if (suspicion >= 60.0) detectionStage = DetectionStage.INVESTIGATING;
-            else if (suspicion >= 25.0) detectionStage = DetectionStage.SUSPICIOUS;
+            else if (suspicion >= 15.0) detectionStage = DetectionStage.SUSPICIOUS;
             else detectionStage = DetectionStage.UNAWARE;
         }
 
@@ -196,16 +170,20 @@ public final class Guard {
             && Point.distance(centerX(), centerY(), noiseX, noiseY) <= noiseRadius) {
             goalX = noiseX - WIDTH / 2.0;
             goalY = noiseY - HEIGHT / 2.0;
-            // Slowly enter Suspicious stage with yellow "?" instead of instantly jumping high
-            if (suspicion < 26.0) {
-                suspicion = 26.0;
-            } else {
-                suspicion = Math.min(58.0, suspicion + 8.0);
+
+            // Slowly rise when hearing footsteps and noise
+            double noiseDist = Point.distance(centerX(), centerY(), noiseX, noiseY);
+            double proximityFactor = Math.max(0.0, 1.0 - (noiseDist / Math.max(1.0, noiseRadius)));
+            double riseRate = 16.0 + 14.0 * proximityFactor;
+            if (sprinting) riseRate *= 1.4;
+
+            suspicion = Math.min(65.0, suspicion + riseRate * dt);
+            detectionStage = suspicion >= 60.0 ? DetectionStage.INVESTIGATING : DetectionStage.SUSPICIOUS;
+            if (state != State.INSPECT) {
+                state = State.INSPECT;
+                stateTimer = 0;
+                setSpeechBubble("...?", new Color(255, 215, 80), 1.8);
             }
-            detectionStage = DetectionStage.SUSPICIOUS;
-            state = State.INSPECT;
-            stateTimer = 0;
-            setSpeechBubble("...?", new Color(255, 215, 80), 1.8);
         }
 
         // --- State Machine Updates ---
