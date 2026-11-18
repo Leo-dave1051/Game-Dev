@@ -104,11 +104,11 @@ public final class Guard {
                 inspectingPainting = null;
             }
 
-            // Suspicion buildup rate based on distance and player stealth
-            double rate = distance < 45 ? 90.0 : distance < 120 ? 55.0 : 35.0;
-            if (guardType == GuardType.ELITE) rate *= 1.45;
-            if (sprinting) rate *= 2.2;
-            else if (sneaking) rate *= 0.55;
+            // Suspicion buildup rate based on distance and player stealth: fills rapidly when in direct sight
+            double rate = distance < 45 ? 145.0 : distance < 120 ? 92.0 : 62.0;
+            if (guardType == GuardType.ELITE) rate *= 1.35;
+            if (sprinting) rate *= 2.0;
+            else if (sneaking) rate *= 0.60;
 
             suspicion = Math.min(100.0, suspicion + rate * dt);
             lostSightTimer = 0;
@@ -165,19 +165,24 @@ public final class Guard {
                     stateTimer = 0;
                     setSpeechBubble("Where did they go?!", new Color(245, 175, 50), 2.0);
                 }
+                double decayRate = 12.0;
+                suspicion = Math.max(0.0, suspicion - dt * decayRate);
             } else if (state == State.INSPECT) {
                 stateTimer += dt;
+                // While investigating a sound/disturbance out of sight, the bar fills slowly
+                suspicion = Math.min(62.0, suspicion + dt * 16.0);
+
                 // If guard reaches suspicious spot and player is gone, investigate briefly then return
                 if (hasReachedGoal(goalX, goalY) || stateTimer >= 4.5) {
                     state = State.RETURN;
                     stateTimer = 0;
                     setSpeechBubble("Nothing here... false alarm.", new Color(180, 210, 180), 2.0);
                 }
+            } else {
+                // Suspicion decays smoothly when returning or back on patrol
+                double decayRate = state == State.SEARCH ? 10.0 : 20.0;
+                suspicion = Math.max(0.0, suspicion - dt * decayRate);
             }
-
-            // Suspicion decays smoothly when out of sight
-            double decayRate = state == State.CHASE ? 12.0 : 25.0;
-            suspicion = Math.max(0.0, suspicion - dt * decayRate);
 
             if (suspicion >= 100.0) detectionStage = DetectionStage.CHASE;
             else if (suspicion >= 92.0) detectionStage = DetectionStage.ALERT;
@@ -192,11 +197,16 @@ public final class Guard {
             && Point.distance(centerX(), centerY(), noiseX, noiseY) <= noiseRadius) {
             goalX = noiseX - WIDTH / 2.0;
             goalY = noiseY - HEIGHT / 2.0;
-            suspicion = Math.max(suspicion, 65.0);
-            detectionStage = DetectionStage.INVESTIGATING;
+            // Slowly enter Suspicious stage with yellow "?" instead of instantly jumping high
+            if (suspicion < 26.0) {
+                suspicion = 26.0;
+            } else {
+                suspicion = Math.min(58.0, suspicion + 8.0);
+            }
+            detectionStage = DetectionStage.SUSPICIOUS;
             state = State.INSPECT;
             stateTimer = 0;
-            setSpeechBubble("What was that sound?!", new Color(255, 185, 60), 2.0);
+            setSpeechBubble("...?", new Color(255, 215, 80), 1.8);
         }
 
         // --- State Machine Updates ---
